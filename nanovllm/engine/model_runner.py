@@ -14,7 +14,7 @@ from nanovllm.utils.loader import load_model
 
 
 class ModelRunner:
-    def __init__(self, config: Config, rank: int, event: Event | list[Event]):
+    def __init__(self, config: Config, rank: int, event: Event | list[Event], smname: str):
         self.config = config
         self.hf_config = config.hf_config
         self.block_size = config.kvcache_block_size
@@ -22,8 +22,10 @@ class ModelRunner:
         self.world_size = config.tensor_parallel_size
         self.rank = rank
         self.event = event
+        self.smname = smname
         if self.rank == 0:
-            self.shm = SharedMemory(name="nanovllm", create=True, size=2**20)
+            self.shm = SharedMemory(name=smname, create=True, size=2**20)
+
     def start(self):
         dist.init_process_group("nccl", "tcp://localhost:2333", world_size=self.world_size, rank=self.rank)
         torch.cuda.set_device(self.rank)
@@ -45,7 +47,7 @@ class ModelRunner:
                 dist.barrier()
             else:
                 dist.barrier()
-                self.shm = SharedMemory(name="nanovllm")
+                self.shm = SharedMemory(name=self.smname)
                 self.loop()
 
     def exit(self):

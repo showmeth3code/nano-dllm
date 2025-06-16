@@ -32,7 +32,7 @@ class LLMEngine:
         runners = []
         for r in range(0, config.tensor_parallel_size):
             event = events if r == 0 else events[r]
-            runners.append(ModelRunner(config, r, event))
+            runners.append(ModelRunner(config, r, event, config.smname))
         self.model_runner = runners[0]
 
         mp.spawn(
