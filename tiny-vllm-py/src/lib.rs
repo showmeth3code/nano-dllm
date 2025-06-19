@@ -68,7 +68,7 @@ fn default_eos() -> i64 {
 }
 
 #[pymodule]
-fn tiny_vllm_py(_py: Python, m: &PyModule) -> PyResult<()> {
+fn tiny_vllm_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(get_device, m)?)?;
     m.add_function(wrap_pyfunction!(get_gpu_memory, m)?)?;
     m.add_function(wrap_pyfunction!(get_gpu_memory_utilization, m)?)?;
