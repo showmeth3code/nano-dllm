@@ -1,0 +1,13 @@
+[package]
+name = "tiny-vllm-py"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "tiny_vllm_py"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.20", features = ["extension-module"] }
+anyhow = "1"
+tiny-vllm-core = { path = "../tiny-vllm-core" }
