@@ -37,3 +37,17 @@ This document breaks down the porting process into epochs. Each epoch correspond
 22. `bench.py` – port benchmark script if desired.
 
 Each task should follow the workflow described in the main porting plan: create stubs, implement functionality, test against the Python version via PyO3 bindings, and commit once the epoch passes all checks.
+
+## Framework Setup Tasks
+1. Create a Rust crate `rust-core` mirroring the `nanovllm` package structure.
+2. Create a separate crate `bindings` using PyO3 and maturin to expose the Rust API to Python.
+3. Configure a Cargo workspace tying both crates together and update `pyproject.toml` to use maturin as the build backend.
+4. Stub each module in `rust-core` before translation so the crate compiles.
+5. Implement unit tests in Rust and reuse Python tests via the PyO3 bridge.
+6. Set up `cargo-nextest` and `criterion` for testing and benchmarking.
+7. Add GitHub Actions workflows to build the Rust project, run nextest, and execute Python tests through maturin.
+
+## Dependency Mapping Tasks
+1. For each Python import, document the corresponding Rust crate (e.g., `numpy` -> `ndarray`, `torch` -> `tch-rs`).
+2. Write small comparison tests to ensure the Rust crate produces identical results to the Python module for key operations.
+3. Note any API differences and how they will be handled in the Rust implementation.
