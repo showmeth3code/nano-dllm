@@ -1,4 +1,6 @@
 use pyo3::prelude::*;
+use tiny_vllm_core::{config, cuda_utils, model::layers};
+use tiny_vllm_core::helpers;
 use tiny_vllm_core::helpers;
 use tiny_vllm_core::{config, cuda_utils};
 use tiny_vllm_core::engine::parallel;
@@ -173,6 +175,10 @@ fn tiny_vllm_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(default_num_kvcache_blocks, m)?)?;
     m.add_function(wrap_pyfunction!(default_eos, m)?)?;
 
+    // layer classes
+    m.add_class::<LinearLayer>()?;
+    m.add_class::<SiluAndMul>()?;
+    m.add_class::<RMSNorm>()?;
 
     m.add_class::<Network>()?;
 
@@ -199,14 +205,30 @@ fn chunked(lst: Vec<i64>, size: usize) -> PyResult<Vec<Vec<i64>>> {
     Ok(helpers::chunked(lst, size))
 }
 
+// ----- Layer wrappers -----
+
+#[pyclass]
+struct LinearLayer {
+    inner: layers::LinearLayer,
+
 #[pyclass]
 struct LinearLayer {
     inner: LinearCore,
+
 }
 
 #[pymethods]
 impl LinearLayer {
     #[new]
+    fn new(weight: Vec<Vec<f32>>, bias: Option<Vec<f32>>) -> Self {
+        Self {
+            inner: layers::LinearLayer::new(weight, bias),
+        }
+    }
+
+    fn forward(&self, x: Vec<Vec<f32>>) -> Vec<Vec<f32>> {
+        self.inner.forward(x)
+
     fn new(weight: PyReadonlyArray2<f32>, bias: Option<PyReadonlyArray1<f32>>) -> Self {
         let weight = weight.as_array().to_owned();
         let bias = bias.map(|b| b.as_array().to_owned());
@@ -217,11 +239,13 @@ impl LinearLayer {
         let x = x.as_array().to_owned();
         let y = self.inner.forward(&x);
         y.into_pyarray_bound(py)
+
     }
 }
 
 #[pyclass]
 struct SiluAndMul {
+    inner: layers::SiluAndMul,
     inner: SiluCore,
 }
 
@@ -229,6 +253,31 @@ struct SiluAndMul {
 impl SiluAndMul {
     #[new]
     fn new() -> Self {
+        Self { inner: layers::SiluAndMul::new() }
+    }
+
+    fn forward(&self, x: Vec<Vec<f32>>) -> Vec<Vec<f32>> {
+        self.inner.forward(x)
+    }
+}
+
+#[pyclass]
+struct RMSNorm {
+    inner: layers::RMSNorm,
+}
+
+#[pymethods]
+impl RMSNorm {
+    #[new]
+    fn new(hidden_size: usize, eps: f32) -> Self {
+        Self { inner: layers::RMSNorm::new(hidden_size, eps) }
+    }
+
+    fn forward(&self, x: Vec<Vec<f32>>) -> Vec<Vec<f32>> {
+        self.inner.forward(x)
+    }
+}
+
         Self { inner: SiluCore::default() }
     }
 
@@ -238,3 +287,4 @@ impl SiluAndMul {
         y.into_pyarray_bound(py)
     }
 }
+
