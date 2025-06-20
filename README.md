@@ -11,7 +11,7 @@ A lightweight vLLM implementation built from scratch.
 ## Installation
 
 ```bash
-conda create -n nano-vllm python=3.10
+conda create -n nano-vllm python=3.10 -y
 conda activate nano-vllm
 
 pip install torch
