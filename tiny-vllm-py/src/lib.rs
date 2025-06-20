@@ -1,7 +1,8 @@
 use pyo3::prelude::*;
 use tiny_vllm_core::helpers;
+use tiny_vllm_core::{config, cuda_utils};
+use tiny_vllm_core::engine::parallel;
 use tiny_vllm_core::{config, cuda_utils, network};
-
 use pyo3::Bound;
 use numpy::{IntoPyArray, PyArray2, PyReadonlyArray1, PyReadonlyArray2};
 use tiny_vllm_core::helpers;
@@ -27,6 +28,32 @@ fn get_gpu_memory() -> PyResult<u64> {
 #[pyfunction]
 fn get_gpu_memory_utilization() -> PyResult<f32> {
     cuda_utils::get_gpu_memory_utilization().map_err(to_py_err)
+}
+
+// ----- Parallel helpers -----
+#[pyfunction]
+fn init_process_group(world_size: usize, rank: usize) {
+    parallel::init_process_group(world_size, rank);
+}
+
+#[pyfunction]
+fn destroy_process_group() {
+    parallel::destroy_process_group();
+}
+
+#[pyfunction]
+fn get_rank() -> usize {
+    parallel::get_rank()
+}
+
+#[pyfunction]
+fn get_world_size() -> usize {
+    parallel::get_world_size()
+}
+
+#[pyfunction]
+fn barrier() {
+    parallel::barrier();
 }
 
 // ----- Default settings helpers -----
@@ -128,6 +155,12 @@ fn tiny_vllm_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(clamp, m)?)?;
     m.add_function(wrap_pyfunction!(flatten, m)?)?;
     m.add_function(wrap_pyfunction!(chunked, m)?)?;
+    // parallel helpers
+    m.add_function(wrap_pyfunction!(init_process_group, m)?)?;
+    m.add_function(wrap_pyfunction!(destroy_process_group, m)?)?;
+    m.add_function(wrap_pyfunction!(get_rank, m)?)?;
+    m.add_function(wrap_pyfunction!(get_world_size, m)?)?;
+    m.add_function(wrap_pyfunction!(barrier, m)?)?;
 
     // default setting helpers
     m.add_function(wrap_pyfunction!(default_max_num_batched_tokens, m)?)?;
