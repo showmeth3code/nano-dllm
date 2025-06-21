@@ -3,6 +3,7 @@
 use std::sync::OnceLock;
 
 pub mod parallel;
+pub mod session;
 
 /// Core inference engine responsible for running models.
 #[derive(Debug)]
