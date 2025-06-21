@@ -7,7 +7,7 @@
 
 use std::sync::{Mutex, OnceLock};
 
-use std::sync::atomic::{AtomicUsize, AtomicBool, Ordering};
+use std::sync::atomic::{AtomicUsize, AtomicBool};
 
 static WORLD_SIZE: OnceLock<AtomicUsize> = OnceLock::new();
 static RANK: OnceLock<AtomicUsize> = OnceLock::new();

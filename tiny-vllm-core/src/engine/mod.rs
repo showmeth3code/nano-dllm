@@ -3,6 +3,9 @@
 use std::sync::OnceLock;
 
 pub mod parallel;
+
+pub mod optim;
+
 pub mod session;
 
 /// Core inference engine responsible for running models.
@@ -45,4 +48,3 @@ mod tests {
         assert_eq!(engine.num_threads(), 4);
     }
 }
-
