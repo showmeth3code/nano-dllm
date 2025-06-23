@@ -49,11 +49,9 @@ class LLMEngine:
         seqs, is_prefill = self.scheduler.schedule()
         result = self.model_runner.call("run", seqs, is_prefill)
         
-        # Handle both list and dict returns from model_runner
         logits_data = {}
         if isinstance(result, dict):
             token_ids = result['tokens']
-            # Store logits data per sequence
             for i, seq in enumerate(seqs):
                 if 'logits' in result and 'indices' in result:
                     logits_data[seq.seq_id] = {
@@ -99,7 +97,6 @@ class LLMEngine:
                     "Decode": f"{int(decode_throughput)}tok/s",
                 })
             
-            # Collect logits data for each step
             for seq_id, logits_info in step_logits_data.items():
                 if seq_id not in all_logits_data:
                     all_logits_data[seq_id] = {'logits': [], 'indices': []}
@@ -112,14 +109,12 @@ class LLMEngine:
                 if use_tqdm:
                     pbar.update(1)
         
-        # Format outputs
         results = []
         for seq_id in sorted(outputs):
             result = {
                 "text": self.tokenizer.decode(outputs[seq_id]), 
                 "token_ids": outputs[seq_id]
             }
-            # Add logits data if available
             if seq_id in all_logits_data and all_logits_data[seq_id]['logits']:
                 result['logits'] = all_logits_data[seq_id]['logits']
                 result['indices'] = all_logits_data[seq_id]['indices']

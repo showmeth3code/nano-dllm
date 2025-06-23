@@ -174,7 +174,7 @@ class ModelRunner:
         for seq in seqs:
             temperatures.append(seq.temperature)
         temperatures = torch.tensor(temperatures, dtype=torch.float32, pin_memory=True).cuda(non_blocking=True)
-        logits_k = seqs[0].logits_k if seqs else 0  # Use first sequence's logits_k (global setting)
+        logits_k = seqs[0].logits_k if seqs else 0
         return temperatures, logits_k
 
     @torch.inference_mode()
@@ -206,7 +206,6 @@ class ModelRunner:
             temperatures, logits_k = sample_data
             result = self.sampler(logits, temperatures, logits_k)
             if isinstance(result, tuple):
-                # Convert to dict format for compatibility
                 tokens, k_logits, indices = result
                 result_dict = {
                     'tokens': tokens.tolist(),
