@@ -272,3 +272,29 @@ Nano-VLLM is a lightweight PyTorch-based implementation of the vLLM inference en
 4. **Repetition Issues**: When facing repetitive output, check sampling logic and implement/tune repetition penalties.
 
 5. **Performance Bottlenecks**: Use profiling to identify slowdowns. Common issues include unnecessary tensor copies and device transfers.
+
+# Optimization Notes and TODOs (2025-06-23)
+
+## Rotary Embedding
+- Resolved shape mismatch issues for rotary embedding on MPS and CUDA devices.
+- Suppressed verbose [DEBUG][rotary] log lines in production for performance and cleaner output.
+- Ensure all tensor shape manipulations in rotary embedding are documented with shape comments.
+
+## MPS Optimizations
+- Added batch splitting and explicit cache clearing for MPS to improve throughput and avoid OOM.
+- Use torch.bfloat16 as default dtype for MPS, float16 for CUDA, float32 for CPU.
+- Always check tensor device before operations to ensure compatibility (CPU, CUDA, MPS).
+
+## Block Allocation & KV Cache
+- Avoid strict assertions on sequence length/block_size; handle edge cases gracefully with validation and error messages.
+- Use test_block_allocation.py and test_block_manager.py to verify block manager logic.
+- Documented relationship between sequence position and KV cache indices; ensure sequence.position is always in sync.
+
+## Sampling Logic
+- Temperature scaling and repetition penalty are applied per batch and per sequence, with device-specific optimizations.
+- Documented and validated correct application of penalties and temperature scaling.
+
+## TODO
+- Further optimize grouped-query attention for large batch sizes and long sequences.
+- Add more explicit validation and error reporting for all device and shape mismatches.
+- Continue to document all non-obvious optimizations and edge case handling in this file.

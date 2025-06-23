@@ -36,34 +36,54 @@ def apply_rotary_emb(
     """
     # Store original dtype for restoring later
     orig_dtype = x.dtype
-    
+
     # Move to float32 for precise computation
     x = x.to(torch.float32)
     cos = cos.to(torch.float32)
     sin = sin.to(torch.float32)
-    
-    # In the Qwen3 implementation, cos/sin from the rotary embedder are [1, seq_len, 128]
-    # but our nano-vllm generates [seq_len, 1, 128] - need to handle both formats 
-    
-    # Make the cos/sin broadcastable to x regardless of exact shape
-    # For [seq_len, 1, head_dim] format from nano-vllm
-    if cos.shape[0] == x.shape[1] and cos.shape[1] == 1:
-        # Assume [seq_len, 1, head_dim] format, reshape to [1, seq_len, 1, head_dim]
-        cos = cos.unsqueeze(0)
-        sin = sin.unsqueeze(0)
-    # For [1, seq_len, head_dim] format from HF
-    elif cos.shape[0] == 1 and cos.shape[1] == x.shape[1]:
-        # Assume [1, seq_len, head_dim] format, reshape to [1, seq_len, 1, head_dim]
-        cos = cos.unsqueeze(2)
-        sin = sin.unsqueeze(2)
-        
-    # Apply the rotation formula with rotate_half (matching HF implementation)
-    # q_embed = (q * cos) + (rotate_half(q) * sin)
-    x_embed = (x * cos) + (rotate_half(x) * sin)
-    
-    # Restore original dtype
+
+    # [batch, seq_len, num_heads, head_dim]
+    # x: [batch, seq_len, num_heads, head_dim]
+    # cos/sin: [batch, seq_len, head_dim] or [seq_len, 1, head_dim] or [1, seq_len, head_dim]
+    # print(f"[DEBUG][rotary] x shape: {x.shape}, cos shape: {cos.shape}, sin shape: {sin.shape}")
+
+    # Ensure cos/sin are broadcastable to x: [batch, seq_len, num_heads, head_dim]
+    # We want cos/sin to be [batch, seq_len, 1, head_dim] or [1, seq_len, 1, head_dim]
+    if cos.dim() == 3:
+        # If cos is [batch, seq_len, head_dim] or [seq_len, 1, head_dim] or [1, seq_len, head_dim]
+        if cos.shape[0] == x.shape[0] and cos.shape[1] == x.shape[1]:
+            # [batch, seq_len, head_dim] -> [batch, seq_len, 1, head_dim]
+            cos = cos.unsqueeze(2)
+            sin = sin.unsqueeze(2)
+        elif cos.shape[0] == x.shape[1] and cos.shape[1] == 1:
+            # [seq_len, 1, head_dim] -> [1, seq_len, 1, head_dim]
+            cos = cos.unsqueeze(0).unsqueeze(2)
+            sin = sin.unsqueeze(0).unsqueeze(2)
+        elif cos.shape[0] == 1 and cos.shape[1] == x.shape[1]:
+            # [1, seq_len, head_dim] -> [1, seq_len, 1, head_dim]
+            cos = cos.unsqueeze(2)
+            sin = sin.unsqueeze(2)
+        else:
+            raise RuntimeError(f"[rotary] Unhandled cos/sin shape: {cos.shape}, x: {x.shape}")
+    elif cos.dim() == 4:
+        # Already broadcastable
+        pass
+    else:
+        raise RuntimeError(f"[rotary] Unexpected cos/sin dim: {cos.dim()}")
+
+    # print(f"[DEBUG][rotary] x shape: {x.shape}, cos shape (after): {cos.shape}, sin shape (after): {sin.shape}")
+
+    # Validate broadcastability
+    if not (cos.shape[0] in (1, x.shape[0]) and cos.shape[1] == x.shape[1] and cos.shape[2] == 1 and cos.shape[3] == x.shape[3]):
+        raise RuntimeError(f"[rotary] After unsqueeze, cos shape {cos.shape} not broadcastable to x {x.shape}")
+
+    # [batch, seq_len, num_heads, head_dim]
+    try:
+        x_embed = (x * cos) + (rotate_half(x) * sin)
+    except RuntimeError as e:
+        raise RuntimeError(f"[rotary] Shape mismatch: x {x.shape}, cos {cos.shape}, sin {sin.shape}. Error: {e}")
+
     x_embed = x_embed.to(orig_dtype)
-    
     return x_embed
 
 

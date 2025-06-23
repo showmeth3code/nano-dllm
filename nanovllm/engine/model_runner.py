@@ -147,46 +147,93 @@ class ModelRunner:
                         batch_ids = self._process_prefill_batch(batch_seqs)
                         next_token_ids.extend(batch_ids)
                 else:
-                    # Standard processing for other devices or small batches
+                    # Batched processing for small batches or non-MPS devices
+                    batch_size = len(seqs)
+                    # [batch_size, seq_len]
+                    input_ids = torch.nn.utils.rnn.pad_sequence(
+                        [torch.tensor(seq.token_ids, device=self.device) for seq in seqs],
+                        batch_first=True, padding_value=0
+                    )
+                    input_ids = input_ids.contiguous().to(self.device)
+                    # [batch_size, seq_len]
+                    seq_lens = torch.tensor([len(seq.token_ids) for seq in seqs], device=self.device)
+                    # [batch_size, seq_len]
+                    positions = torch.arange(0, input_ids.shape[1], dtype=torch.long, device=self.device).unsqueeze(0).expand(batch_size, -1)
+                    # Forward pass
+                    # [batch_size, seq_len, vocab_size]
+                    logits = self.model(input_ids, positions)
+                    # [batch_size, vocab_size] (last token for each sequence)
+                    next_token_logits = logits[torch.arange(batch_size, device=self.device), seq_lens - 1, :]
+                    # Apply temperature scaling and sampling in batch
+                    temperatures = torch.tensor([seq.sampling_params.temperature for seq in seqs], device=self.device)
+                    # [batch_size, vocab_size]
+                    # (greedy_mask removed, not used)
+                    # For greedy, use argmax; for others, apply temperature and sample
+                    next_token_ids = []
+                    for i in range(batch_size):
+                        logits_i = next_token_logits[i]
+                        temp = temperatures[i].item()
+                        if temp <= 1e-6:
+                            next_token_id = torch.argmax(logits_i).item()
+                        else:
+                            # Temperature scaling and robust sampling
+                            scaled_logits = logits_i / temp
+                            probs = torch.softmax(scaled_logits, dim=0)
+                            # Clamp probabilities to valid range
+                            probs = torch.clamp(probs, min=0.0, max=1.0)
+                            if torch.isnan(probs).any() or torch.isinf(probs).any() or (probs < 0).any():
+                                print(f"[ERROR] Invalid probabilities after softmax (prefill batch): {probs}")
+                                probs = torch.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
+                                probs = torch.clamp(probs, min=0.0, max=1.0)
+                            if probs.sum() == 0:
+                                print("[ERROR] All probabilities are zero after sanitization (prefill batch). Falling back to argmax.")
+                                next_token_id = torch.argmax(logits_i).item()
+                            else:
+                                probs = probs / probs.sum()  # Renormalize
+                                next_token_id = torch.multinomial(probs, num_samples=1).item()
+                        next_token_ids.append(next_token_id)
+                    # Store context for each sequence
+                    for i, seq in enumerate(seqs):
+                        seq_id = seq.seq_id
+                        self.kv_caches[seq_id] = {
+                            'position': seq_lens[i].item(),
+                            'tokens': seq.token_ids.copy()
+                        }
+                    # Per-sequence processing (avoids rotary embedding shape mismatch)
+                    next_token_ids = []
                     for seq in seqs:
                         seq_id = seq.seq_id
-                        
-                        # Convert to tensor and ensure device
                         # [1, seq_len]
-                        input_ids = torch.tensor(seq.token_ids, device=self.device).unsqueeze(0)
-                        
-                        # Generate positions starting from 0
-                        # [1, seq_len]  
+                        input_ids = torch.tensor(seq.token_ids, device=self.device).unsqueeze(0).contiguous()
+                        # [1, seq_len]
                         positions = torch.arange(0, input_ids.shape[1], dtype=torch.long, device=self.device).unsqueeze(0)
-                        
-                        # Forward pass
                         # [1, seq_len, vocab_size]
                         logits = self.model(input_ids, positions)
-                        
-                        # Get the last token's logits for sampling
                         # [vocab_size]
                         next_token_logits = logits[0, -1, :]
-                        
-                        # Apply temperature
                         temperature = seq.sampling_params.temperature
-                        
-                        # Sample token
-                        if temperature <= 1e-6:  # Nearly zero temperature -> greedy
+                        if temperature <= 1e-6:
                             next_token_id = torch.argmax(next_token_logits).item()
                         else:
-                            # Apply temperature and convert to probability distribution
-                            next_token_logits = next_token_logits / temperature
-                            probs = torch.softmax(next_token_logits, dim=0)
-                            
-                            # Sample from the distribution
-                            next_token_id = torch.multinomial(probs, num_samples=1).item()
-                        
+                            # Temperature scaling and robust sampling
+                            scaled_logits = next_token_logits / temperature
+                            probs = torch.softmax(scaled_logits, dim=0)
+                            # Clamp probabilities to valid range
+                            probs = torch.clamp(probs, min=0.0, max=1.0)
+                            if torch.isnan(probs).any() or torch.isinf(probs).any() or (probs < 0).any():
+                                print(f"[ERROR] Invalid probabilities after softmax (prefill single): {probs}")
+                                probs = torch.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
+                                probs = torch.clamp(probs, min=0.0, max=1.0)
+                            if probs.sum() == 0:
+                                print("[ERROR] All probabilities are zero after sanitization (prefill single). Falling back to argmax.")
+                                next_token_id = torch.argmax(next_token_logits).item()
+                            else:
+                                probs = probs / probs.sum()  # Renormalize
+                                next_token_id = torch.multinomial(probs, num_samples=1).item()
                         next_token_ids.append(next_token_id)
-                        
-                        # Store this sequence's context for future decoding
                         self.kv_caches[seq_id] = {
-                            'position': input_ids.shape[1],  # Next position will be this
-                            'tokens': seq.token_ids.copy()  # Store full token sequence
+                            'position': input_ids.shape[1],
+                            'tokens': seq.token_ids.copy()
                         }
                 
                 if not self.is_mps:  # Skip verbose logging on MPS for performance
@@ -202,106 +249,98 @@ class ModelRunner:
                 # Decode phase (generating next token)
                 return self._run_decode(seqs)
                 
-    def _run_decode(self, seqs: "list[Sequence]") -> list[int]:
+    def _run_decode(self, seqs: list["Sequence"]) -> list[int]:
         """
         Run decode-phase (next token prediction) with MPS optimizations
         
         Args:
             seqs: List of sequences to generate the next token for
-            
+        
         Returns:
             List of generated next token IDs
         """
-        next_token_ids = []
-        
+        next_token_ids: list[int] = []
         # MPS optimization: Process in smaller batches for better memory management
         if self.is_mps and len(seqs) > 3:
-            # Use smaller batch size for MPS decoding
-            batch_size = 2
+            batch_size: int = 2
             for i in range(0, len(seqs), batch_size):
                 batch = seqs[i:i+batch_size]
-                batch_ids = []
-                
-                # Process each sequence in the batch
+                batch_ids: list[int] = []
                 for seq in batch:
                     token_id = self._decode_single_sequence(seq)
                     batch_ids.append(token_id)
-                    
                 next_token_ids.extend(batch_ids)
         else:
-            # Standard processing for smaller batches or non-MPS devices
             for seq in seqs:
                 token_id = self._decode_single_sequence(seq)
                 next_token_ids.append(token_id)
-                
         return next_token_ids
-        
+
     def _decode_single_sequence(self, seq: "Sequence") -> int:
         """
         Process a single sequence for next-token prediction with MPS optimizations
         
         Args:
             seq: Sequence to process
-            
+        
         Returns:
             Next token ID
         """
-        seq_id = seq.seq_id
-        
+        seq_id: int = seq.seq_id
         # Check if we have this sequence in our cache 
         if seq_id not in self.kv_caches:
             print(f"WARNING: Sequence {seq_id} not found in KV cache. Creating new entry.")
-            # Create new entry based on current sequence state
             self.kv_caches[seq_id] = {
                 'position': len(seq.token_ids),
                 'tokens': seq.token_ids.copy()
             }
-        
-        # Get the full token sequence from our cache
-        tokens = self.kv_caches[seq_id]['tokens']
-        
-        # Convert to tensor and ensure device 
+        tokens: list[int] = self.kv_caches[seq_id]['tokens']
         # [1, seq_len]
-        input_ids = torch.tensor(tokens, device=self.device).unsqueeze(0)
-        
-        # Generate positions for the full sequence starting from 0
+        input_ids: torch.Tensor = torch.tensor(tokens, device=self.device).unsqueeze(0)
         # [1, seq_len]
-        positions = torch.arange(0, len(tokens), dtype=torch.long, device=self.device).unsqueeze(0)
-        
-        # Forward pass through model with full context
+        positions: torch.Tensor = torch.arange(0, len(tokens), dtype=torch.long, device=self.device).unsqueeze(0)
         # [1, seq_len, vocab_size]
-        logits = self.model(input_ids, positions)
-        
-        # Get logits for the last token
+        logits: torch.Tensor = self.model(input_ids, positions)
         # [vocab_size]
-        next_token_logits = logits[0, -1, :]
-        
-        # MPS optimization: Use specialized repetition penalty
+        next_token_logits: torch.Tensor = logits[0, -1, :]
+        # Apply repetition penalty
         if self.is_mps:
-            # More efficient implementation for MPS
             self._apply_repetition_penalty_mps(next_token_logits, tokens)
         else:
-            # Standard penalty for other devices
             self._apply_repetition_penalty(next_token_logits, tokens)
-        
-        # Apply temperature
-        temperature = seq.sampling_params.temperature
-        
+        temperature: float = getattr(seq.sampling_params, 'temperature', 1.0)
+        # Validate device compatibility
+        if next_token_logits.device != self.device:
+            next_token_logits = next_token_logits.to(self.device)
+        # Sanitize logits before sampling
+        if torch.isnan(next_token_logits).any() or torch.isinf(next_token_logits).any():
+            print(f"[ERROR] NaN or Inf detected in logits before sampling. Logits: {next_token_logits}")
+            next_token_logits = torch.nan_to_num(next_token_logits, nan=0.0, posinf=0.0, neginf=0.0)
         # Sample next token
-        if temperature <= 1e-6:  # Nearly zero temperature -> greedy
-            next_token_id = torch.argmax(next_token_logits).item()
+        if temperature <= 1e-6:
+            # Greedy decoding
+            next_token_id: int = int(torch.argmax(next_token_logits).item())
         else:
-            # Apply temperature and convert to probability distribution
-            next_token_logits = next_token_logits / temperature
-            probs = torch.softmax(next_token_logits, dim=0)
-            
-            # Sample from the distribution
-            next_token_id = torch.multinomial(probs, num_samples=1).item()
-        
+            # Temperature scaling and sampling
+            scaled_logits: torch.Tensor = next_token_logits / temperature  # [vocab_size]
+            probs: torch.Tensor = torch.softmax(scaled_logits, dim=0)  # [vocab_size]
+            # Clamp probabilities to valid range
+            probs = torch.clamp(probs, min=0.0, max=1.0)
+            if torch.isnan(probs).any() or torch.isinf(probs).any() or (probs < 0).any():
+                print(f"[ERROR] Invalid probabilities after softmax: {probs}")
+                probs = torch.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
+                probs = torch.clamp(probs, min=0.0, max=1.0)
+            if probs.sum() == 0:
+                print("[ERROR] All probabilities are zero after sanitization. Falling back to argmax.")
+                next_token_id: int = int(torch.argmax(next_token_logits).item())
+            else:
+                probs = probs / probs.sum()  # Renormalize
+                next_token_id: int = int(torch.multinomial(probs, num_samples=1).item())
         # Update cache with the new token
         self.kv_caches[seq_id]['tokens'].append(next_token_id)
-        
-        return int(next_token_id)
+        # Update position property for sequence tracking
+        self.kv_caches[seq_id]['position'] = len(self.kv_caches[seq_id]['tokens'])
+        return next_token_id
         
     def _apply_repetition_penalty(self, logits: torch.Tensor, tokens: list) -> None:
         """Apply repetition penalty to reduce repetitive outputs"""
