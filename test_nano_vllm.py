@@ -19,7 +19,7 @@ print(f"CUDA available: {torch.cuda.is_available()}")
 print(f"MPS available: {hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()}")
 
 # Set device - use CPU if there are known issues with MPS
-USE_CPU = True  # Set to True if you want to force CPU usage
+USE_CPU = False  # Set to True if you want to force CPU usage
 device = torch.device("cuda" if torch.cuda.is_available() and not USE_CPU else 
                      "mps" if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available() and not USE_CPU else
                      "cpu")
@@ -634,9 +634,6 @@ for model_name in models:
         print(f"Model path: {model_name}")
         print(f"Model type: {getattr(config.hf_config, 'model_type', 'unknown')}")
         print(f"Vocab size: {config.vocab_size}")
-        print(f"Hidden size: {config.hidden_size}")
-        print(f"Num attention heads: {config.num_attention_heads}")
-        print(f"Num key-value heads: {config.num_kv_heads}")
         print(f"Tokenizer class: {tokenizer.__class__.__name__}")
         print(f"Tokenizer vocab size: {len(tokenizer)}")
         print(f"EOS token ID: {config.eos}")

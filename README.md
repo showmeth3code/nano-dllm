@@ -47,3 +47,17 @@ See `bench.py` for benchmark.
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=GeeeekExplorer/nano-vllm&type=Date)](https://www.star-history.com/#GeeeekExplorer/nano-vllm&Date)
+
+## Contributing
+
+### Project Documentation
+
+- `MAINTENANCE.md` contains detailed information about project architecture, common issues, and best practices for code maintenance.
+- `.github/copilot-instructions.md` provides specific guidance for GitHub Copilot to maintain consistency in code style and implementation patterns when assisting with this project.
+
+When contributing to this project, please review these documents to understand:
+- The architecture of the KV cache block management system
+- Attention implementation guidelines
+- Proper tensor shape handling
+- Device compatibility (CUDA/MPS) considerations
+- Testing and benchmarking protocols
