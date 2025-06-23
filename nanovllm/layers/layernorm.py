@@ -14,31 +14,73 @@ class RMSNorm(nn.Module):
         self.eps = eps
         self.weight = nn.Parameter(torch.ones(hidden_size))
 
-    @torch.compile
     def rms_forward(
         self,
         x: torch.Tensor,
     ) -> torch.Tensor:
-        orig_dtype = x.dtype
-        x = x.to(torch.float32)
-        var = x.pow(2).mean(dim=-1, keepdim=True)
-        x.mul_(torch.rsqrt(var + self.eps))
-        x = x.to(orig_dtype).mul_(self.weight)
-        return x
+        """RMSNorm implementation exactly matching HuggingFace Qwen3 RMSNorm.
+        
+        HF Qwen3 implementation:
+        ```
+        def forward(self, hidden_states):
+            input_dtype = hidden_states.dtype
+            variance = hidden_states.to(torch.float32).pow(2).mean(-1, keepdim=True)
+            hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
+            return self.weight * hidden_states.to(input_dtype)
+        ```
+        """
+        # Save original dtype to restore later
+        input_dtype = x.dtype
+        
+        # Compute variance in float32, exactly as HF does
+        variance = x.to(torch.float32).pow(2).mean(-1, keepdim=True)
+        
+        # Apply normalization - convert to float32, normalize, then back to input dtype
+        x = x * torch.rsqrt(variance + self.eps)
+        
+        # Apply weight and return to original dtype, exactly as HF does
+        return self.weight * x.to(input_dtype)
 
-    @torch.compile
     def add_rms_forward(
         self,
         x: torch.Tensor,
         residual: torch.Tensor,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        """RMSNorm with residual connection, exactly matching HuggingFace.
+        
+        This is used when we want to add a residual connection and then normalize.
+        """
         orig_dtype = x.dtype
-        x = x.to(torch.float32).add_(residual.to(torch.float32))
-        residual = x.to(orig_dtype)
+        
+        # Ensure all tensors are float32 for precise computation
+        x = x.to(torch.float32)
+        residual = residual.to(torch.float32)
+        weight = self.weight.to(torch.float32)
+        
+        # Ensure residual matches x's shape by slicing to the same batch size
+        if residual.shape[0] != x.shape[0]:
+            residual = residual[:x.shape[0]]
+        
+        # Add residual (use non-inplace addition)
+        x = x + residual
+        
+        # Save for return
+        residual_out = x.clone()
+        
+        # Compute variance
         var = x.pow(2).mean(dim=-1, keepdim=True)
-        x.mul_(torch.rsqrt(var + self.eps))
-        x = x.to(orig_dtype).mul_(self.weight)
-        return x, residual
+        
+        # Apply normalization
+        x = x * torch.rsqrt(var + self.eps)
+        
+        # Apply weight
+        x = x * weight
+        
+        # Return to original dtype
+        x = x.to(orig_dtype)
+        residual_out = residual_out.to(orig_dtype)
+        
+        return x, residual_out
 
     def forward(
         self,

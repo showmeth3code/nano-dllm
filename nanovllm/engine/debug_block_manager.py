@@ -123,42 +123,51 @@ class BlockManager:
         return len(self.free_block_ids) >= (len(seq) % self.block_size == 1)
 
     def may_append(self, seq: Sequence):
-        """
-        Manage block allocation when a new token is appended to a sequence.
-        
-        This function handles three cases based on the sequence length relative to block size:
-        1. When len(seq) % block_size == 1: We need to allocate a new block
-        2. When len(seq) % block_size == 0: We've just filled a block completely and need to set its hash
-        3. Otherwise: We're still filling an already allocated block
-        
-        The original implementation had an assertion that last_block.hash != -1 in case 1,
-        but this can fail in certain race conditions or when sequences have unusual token counts.
-        This implementation removes those assertions for more robust behavior.
-        """
         block_table = seq.block_table
         if not block_table:
             raise ValueError(f"Empty block table for sequence {seq.seq_id}")
             
         last_block = self.blocks[block_table[-1]]
         
-        # Case 1: Need to allocate a new block (first token in a new block)
+        # Debug info
+        print(f"Sequence ID: {seq.seq_id}, Length: {len(seq)}, Mod block_size: {len(seq) % self.block_size}")
+        print(f"Last block ID: {last_block.block_id}, Hash: {last_block.hash}")
+        print(f"Block table: {seq.block_table}")
+        
+        # Logic based on sequence length relative to block size
         if len(seq) % self.block_size == 1:
-            # Simply allocate a new block regardless of the state of the previous one
-            block_id = self.free_block_ids[0]
-            self._allocate_block(block_id)
-            block_table.append(block_id)
-            
-        # Case 2: Just filled a block completely
+            if last_block.hash == -1:
+                print(f"ERROR: Attempting to allocate a new block but last_block.hash is -1")
+                # We'll fix the issue here
+                if len(seq.block_table) > 1:
+                    previous_block = self.blocks[block_table[-2]]
+                    print(f"Previous block hash: {previous_block.hash}")
+                    token_ids = seq.block(seq.num_blocks-2)  # Get the completed previous block
+                    h = self.compute_hash(token_ids, -1 if len(block_table) <= 2 else self.blocks[block_table[-3]].hash)
+                    print(f"Computed hash for previous block: {h}")
+                    previous_block.update(h, token_ids)
+                    self.hash_to_block_id[h] = previous_block.block_id
+                
+                # We don't assert but continue with the allocation
+                block_id = self.free_block_ids[0]
+                self._allocate_block(block_id)
+                block_table.append(block_id)
+            else:
+                # This is the expected path
+                block_id = self.free_block_ids[0]
+                self._allocate_block(block_id)
+                block_table.append(block_id)
+                
         elif len(seq) % self.block_size == 0:
-            # Compute hash for the now-complete block
+            # The block should be full now, compute its hash
             token_ids = seq.block(seq.num_blocks-1)
             prefix = self.blocks[block_table[-2]].hash if len(block_table) > 1 else -1
             h = self.compute_hash(token_ids, prefix)
             last_block.update(h, token_ids)
             self.hash_to_block_id[h] = last_block.block_id
-            
-        # Case 3: Still filling a block, ensure hash is -1 as expected
         else:
+            # Still filling the block, hash should be -1
             if last_block.hash != -1:
-                # This is unexpected but might happen - reset it to the expected state
+                print(f"WARNING: Unexpected hash value {last_block.hash} for partially filled block")
+                # Fix it by resetting the hash
                 last_block.hash = -1
