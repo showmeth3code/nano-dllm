@@ -174,7 +174,8 @@ class ModelRunner:
         for seq in seqs:
             temperatures.append(seq.temperature)
         temperatures = torch.tensor(temperatures, dtype=torch.float32, pin_memory=True).cuda(non_blocking=True)
-        return temperatures
+        logits_k = seqs[0].logits_k if seqs else 0  # Use first sequence's logits_k (global setting)
+        return temperatures, logits_k
 
     @torch.inference_mode()
     def run_model(self, input_ids: torch.Tensor, positions: torch.Tensor, is_prefill):
@@ -202,13 +203,30 @@ class ModelRunner:
         graph_vars["context_lens"].zero_()
         graph_vars["block_tables"].zero_()
     
-    def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int]:
+    def run(self, seqs: list[Sequence], is_prefill: bool) -> list:
         input_ids, positions = self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)
-        temperatures = self.prepare_sample(seqs) if self.rank == 0 else None
+        sample_data = self.prepare_sample(seqs) if self.rank == 0 else (None, 0)
         logits = self.run_model(input_ids, positions, is_prefill)
-        token_ids = self.sampler(logits, temperatures).tolist() if self.rank == 0 else None
-        reset_context()
-        return token_ids
+        
+        if self.rank == 0:
+            temperatures, logits_k = sample_data
+            result = self.sampler(logits, temperatures, logits_k)
+            if isinstance(result, tuple):
+                # Convert to dict format for compatibility
+                tokens, k_logits, indices = result
+                result_dict = {
+                    'tokens': tokens.tolist(),
+                    'logits': k_logits.tolist(),
+                    'indices': indices.tolist()
+                }
+                reset_context()
+                return result_dict
+            else:
+                reset_context()
+                return result.tolist()
+        else:
+            reset_context()
+            return None
 
     @torch.inference_mode()
     def capture_cudagraph(self):
