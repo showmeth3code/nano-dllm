@@ -50,20 +50,23 @@ class LLMEngine:
         result = self.model_runner.call("run", seqs, is_prefill)
         
         # Handle both list and dict returns from model_runner
+        logits_data = {}
         if isinstance(result, dict):
             token_ids = result['tokens']
-            # Store logits data if needed (could be used for distillation later)
-            self._last_logits = result.get('logits')
-            self._last_indices = result.get('indices')
+            # Store logits data per sequence
+            for i, seq in enumerate(seqs):
+                if 'logits' in result and 'indices' in result:
+                    logits_data[seq.seq_id] = {
+                        'logits': result['logits'][i] if i < len(result['logits']) else None,
+                        'indices': result['indices'][i] if i < len(result['indices']) else None
+                    }
         else:
             token_ids = result
-            self._last_logits = None
-            self._last_indices = None
             
         self.scheduler.postprocess(seqs, token_ids)
-        outputs = [(seq.seq_id, seq.completion_token_ids) for seq in seqs if seq.is_finished]
+        outputs = [(seq.seq_id, seq.completion_token_ids, logits_data.get(seq.seq_id)) for seq in seqs if seq.is_finished]
         num_tokens = sum(len(seq) for seq in seqs) if is_prefill else -len(seqs)
-        return outputs, num_tokens
+        return outputs, num_tokens, logits_data
 
     def is_finished(self):
         return self.scheduler.is_finished()
@@ -81,10 +84,11 @@ class LLMEngine:
         for prompt, sp in zip(prompts, sampling_params):
             self.add_request(prompt, sp)
         outputs = {}
+        all_logits_data = {}
         prefill_throughput = decode_throughput = 0.
         while not self.is_finished():
             t = perf_counter()
-            output, num_tokens = self.step()
+            output, num_tokens, step_logits_data = self.step()
             if use_tqdm:
                 if num_tokens > 0:
                     prefill_throughput = num_tokens / (perf_counter() - t)
@@ -94,12 +98,33 @@ class LLMEngine:
                     "Prefill": f"{int(prefill_throughput)}tok/s",
                     "Decode": f"{int(decode_throughput)}tok/s",
                 })
-            for seq_id, token_ids in output:
+            
+            # Collect logits data for each step
+            for seq_id, logits_info in step_logits_data.items():
+                if seq_id not in all_logits_data:
+                    all_logits_data[seq_id] = {'logits': [], 'indices': []}
+                if logits_info and logits_info['logits'] is not None:
+                    all_logits_data[seq_id]['logits'].append(logits_info['logits'])
+                    all_logits_data[seq_id]['indices'].append(logits_info['indices'])
+            
+            for seq_id, token_ids, _ in output:
                 outputs[seq_id] = token_ids
                 if use_tqdm:
                     pbar.update(1)
-        outputs = [outputs[seq_id] for seq_id in sorted(outputs)]
-        outputs = [{"text": self.tokenizer.decode(token_ids), "token_ids": token_ids} for token_ids in outputs]
+        
+        # Format outputs
+        results = []
+        for seq_id in sorted(outputs):
+            result = {
+                "text": self.tokenizer.decode(outputs[seq_id]), 
+                "token_ids": outputs[seq_id]
+            }
+            # Add logits data if available
+            if seq_id in all_logits_data and all_logits_data[seq_id]['logits']:
+                result['logits'] = all_logits_data[seq_id]['logits']
+                result['indices'] = all_logits_data[seq_id]['indices']
+            results.append(result)
+        
         if use_tqdm:
             pbar.close()
-        return outputs
+        return results
