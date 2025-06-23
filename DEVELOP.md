@@ -273,7 +273,7 @@ Nano-VLLM is a lightweight PyTorch-based implementation of the vLLM inference en
 
 5. **Performance Bottlenecks**: Use profiling to identify slowdowns. Common issues include unnecessary tensor copies and device transfers.
 
-# Optimization Notes and TODOs (2025-06-23)
+# Optimization Notes and TODOs
 
 ## Rotary Embedding
 - Resolved shape mismatch issues for rotary embedding on MPS and CUDA devices.
