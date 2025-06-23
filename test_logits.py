@@ -101,7 +101,7 @@ prompts = [
 
 # Initialize model (adjust model path as needed)
 print("Initializing model...")
-llm = LLM(model="Qwen/Qwen2.5-1.5B-Instruct")
+llm = LLM(model="/home/dgxuser/.cache/huggingface/hub/models--Qwen--Qwen3-4B/snapshots/531c80e289d6cff3a7cd8c0db8110231d23a6f7a")
 print("Model loaded successfully!")
 print()
 
