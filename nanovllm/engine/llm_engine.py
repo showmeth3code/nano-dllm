@@ -47,7 +47,19 @@ class LLMEngine:
 
     def step(self):
         seqs, is_prefill = self.scheduler.schedule()
-        token_ids = self.model_runner.call("run", seqs, is_prefill)
+        result = self.model_runner.call("run", seqs, is_prefill)
+        
+        # Handle both list and dict returns from model_runner
+        if isinstance(result, dict):
+            token_ids = result['tokens']
+            # Store logits data if needed (could be used for distillation later)
+            self._last_logits = result.get('logits')
+            self._last_indices = result.get('indices')
+        else:
+            token_ids = result
+            self._last_logits = None
+            self._last_indices = None
+            
         self.scheduler.postprocess(seqs, token_ids)
         outputs = [(seq.seq_id, seq.completion_token_ids) for seq in seqs if seq.is_finished]
         num_tokens = sum(len(seq) for seq in seqs) if is_prefill else -len(seqs)

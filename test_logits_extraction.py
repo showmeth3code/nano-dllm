@@ -26,7 +26,8 @@ outputs = llm.generate(prompts, params)
 for i, output in enumerate(outputs):
     print(f"Prompt {i}: {prompts[i]}")
     print(f"Output type: {type(output)}")
-    print(f"Generated text: {output}")
+    print(f"Generated text: {output['text']}")
+    print(f"Token IDs: {output['token_ids']}")
     print()
 
 # Test 2: Top-K logits extraction (logits_k=5)
