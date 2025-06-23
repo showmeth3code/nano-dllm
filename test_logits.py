@@ -29,7 +29,7 @@ assert k_logits.shape == (2, 8)
 assert indices.shape == (2, 8)
 
 # API test
-llm = LLM(model="Qwen/Qwen2.5-1.5B-Instruct")
+llm = LLM(model="/home/dgxuser/.cache/huggingface/hub/models--Qwen--Qwen3-4B/snapshots/531c80e289d6cff3a7cd8c0db8110231d23a6f7a")
 prompts = ["The capital of France is", "Machine learning is"]
 
 # Standard generation
