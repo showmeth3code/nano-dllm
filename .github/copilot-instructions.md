@@ -32,3 +32,15 @@ When tracking sequence positions, ensure the position property in sequence.py is
 * use snake_case for function and variable names and _ for private variables
 * use CamelCase for class names
 * use docstrings for public methods and functions
+
+
+## Testing and Debugging
+* use pytest for testing
+* mock external dependencies where necessary
+* write unit tests for all public methods and functions
+* use fixtures for setup and teardown of test environments
+* use assert statements for testing expected outcomes
+* use logging for debugging and error messages
+* use pytest.mark.parametrize for parameterized tests
+* ensure tests are isolated and do not depend on each other
+* setup tests to run on a smaller subset of data before scaling up

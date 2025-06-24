@@ -1,13 +1,11 @@
-import time
 
 def _import_hf_mini_deps():
-    import time
     from nanovllm.engine.llm_engine import LLMEngine
     from nanovllm.config import Config
     from nanovllm.utils.loader import load_model
     from transformers import AutoTokenizer
     from nanovllm.sampling_params import SamplingParams
-    return time, LLMEngine, Config, load_model, AutoTokenizer, SamplingParams
+    return LLMEngine, Config, load_model, AutoTokenizer, SamplingParams
 
 models = [
     "Qwen/Qwen1.5-0.5B",
@@ -21,7 +19,7 @@ messages = [
 ]
 
 def run_hf_mini_test():
-    time, LLMEngine, Config, load_model, AutoTokenizer, SamplingParams = _import_hf_mini_deps()
+    LLMEngine, Config, load_model, AutoTokenizer, SamplingParams = _import_hf_mini_deps()
     for model_name in models:
         print(f"Testing model: {model_name}")
         # Load tokenizer

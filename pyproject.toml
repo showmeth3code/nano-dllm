@@ -29,6 +29,5 @@ packages = ["nanovllm"]
 dev = [
     "pytest>=8.4.1",
     "pytest-timeout>=2.4.0",
-    "tensorboard>=2.19.0",
     "tqdm",
 ]

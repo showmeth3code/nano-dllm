@@ -48,9 +48,10 @@ class ModelRunner:
             print("Using CPU for computations - this will be slow")
             self.is_mps = False
 
-        print(f"[DEBUG] {datetime.datetime.now()} Initializing process group")
-        dist.init_process_group("gloo", "tcp://localhost:2333", world_size=self.world_size, rank=rank)
-        print(f"[DEBUG] {datetime.datetime.now()} Process group initialized")
+        if self.world_size > 1:
+            print(f"[DEBUG] {datetime.datetime.now()} Initializing process group")
+            dist.init_process_group("gloo", "tcp://localhost:2333", world_size=self.world_size, rank=rank)
+            print(f"[DEBUG] {datetime.datetime.now()} Process group initialized")
         
         # Set default dtype based on device - bf16 works well on MPS, float32 on CPU
         if self.device.type == 'mps':

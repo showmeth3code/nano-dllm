@@ -19,32 +19,31 @@ class Qwen3MLP(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward function for the MLP exactly matching HuggingFace.
-        
         Steps:
         1. Apply gate and up projections
         2. Apply SiLU activation and multiply (gating mechanism)
         3. Apply down projection
+        Handles dtype compatibility for all linear ops.
         """
         # Save original dtype
         orig_dtype = x.dtype
-        
-        # Convert to float32 for stable computation
-        x_float = x.to(torch.float32)
-        
-        # Apply gate and up projections (guaranteeing float32)
-        gate = self.gate_proj(x_float)
-        up = self.up_proj(x_float)
-        
-        # Apply SiLU activation and multiply
-        # The activation happens in float32 to match HuggingFace
-        x = self.act(gate, up)
-        
-        # Apply down projection (staying in float32)
-        out = self.down_proj(x)
-        
+
+        # Use the dtype of the weights for all linear ops
+        linear_dtype = self.gate_proj.weight.dtype
+        x_proj = x.to(linear_dtype)
+
+        # [batch_size, seq_len, hidden_dim]
+        gate = self.gate_proj(x_proj)
+        up = self.up_proj(x_proj)
+
+        # SiLU activation and multiply (in linear_dtype)
+        x_act = self.act(gate, up)
+
+        # Down projection (in linear_dtype)
+        out = self.down_proj(x_act)
+
         # Return to original dtype
         out = out.to(orig_dtype)
-        
         return out
 
 
