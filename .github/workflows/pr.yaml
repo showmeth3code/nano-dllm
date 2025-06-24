@@ -33,4 +33,4 @@ jobs:
       - name: Run tests with uv
         run: |
           source .venv/bin/activate
-          uv pip run pytest tests/ --maxfail=3 --disable-warnings -q
+          uv run pytest tests/ --maxfail=3 --disable-warnings -q
