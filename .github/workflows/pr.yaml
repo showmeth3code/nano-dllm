@@ -19,10 +19,18 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
+      - name: Create and activate uv virtual environment
+        run: |
+          uv venv .venv
+          source .venv/bin/activate
+
       - name: Install dependencies with uv
         run: |
+          source .venv/bin/activate
           uv pip install .
           uv pip install pytest
 
       - name: Run tests with uv
-        run: uv pip run pytest tests/ --maxfail=3 --disable-warnings -q
+        run: |
+          source .venv/bin/activate
+          uv pip run pytest tests/ --maxfail=3 --disable-warnings -q
