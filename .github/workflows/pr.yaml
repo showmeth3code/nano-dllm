@@ -1,0 +1,36 @@
+name: Run Pytest
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Create and activate uv virtual environment
+        run: |
+          uv venv .venv
+          source .venv/bin/activate
+
+      - name: Install dependencies with uv
+        run: |
+          source .venv/bin/activate
+          uv pip install .
+          uv pip install pytest
+
+      - name: Run tests with uv
+        run: |
+          source .venv/bin/activate
+          uv pip run pytest tests/ --maxfail=3 --disable-warnings -q
