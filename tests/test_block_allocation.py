@@ -2,17 +2,13 @@ import traceback
 from nanovllm.engine.block_manager import BlockManager
 from nanovllm.engine.sequence import Sequence
 from nanovllm.sampling_params import SamplingParams
-
 def test_block_allocation():
     try:
         print("Setting up test...")
         block_size = 256
         num_blocks = 20  # Generous allocation
-        
         # Create the block manager
         manager = BlockManager(num_blocks=num_blocks, block_size=block_size)
-        print(f"Created BlockManager with {num_blocks} blocks of size {block_size}")
-        
         # Create a sequence exactly block_size tokens
         tokens = list(range(block_size))
         params = SamplingParams(temperature=0.6, ignore_eos=True, max_tokens=10)

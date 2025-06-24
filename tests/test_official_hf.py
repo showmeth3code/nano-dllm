@@ -1,5 +1,8 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer
-import torch
+def _import_official_hf_deps():
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    import torch
+    return AutoModelForCausalLM, AutoTokenizer, torch
 
 def test_official_hf():
     print("=== Testing Official HuggingFace Pipeline for Qwen3-0.6B ===\n")
@@ -7,6 +10,7 @@ def test_official_hf():
     model_name = "Qwen/Qwen3-0.6B"
     
     # Load model and tokenizer
+    AutoModelForCausalLM, AutoTokenizer, torch = _import_official_hf_deps()
     print("Loading model and tokenizer...")
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     

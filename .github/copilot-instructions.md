@@ -21,3 +21,14 @@ For sampling logic implementation, ensure temperature scaling is correct and rep
 Document all complex algorithms and non-obvious optimizations, especially in the block manager and attention implementation.
 
 When tracking sequence positions, ensure the position property in sequence.py is correctly used and position values match KV cache indices.
+
+
+## Formatting and Style Guide
+* keep imports organized and grouped by standard library, third-party libraries, and local imports and at the top of the file and remove unused imports
+* use 4 spaces for indentation
+* use double quotes for strings
+* use f-strings for string formatting
+* use type hints for function parameters and return values
+* use snake_case for function and variable names and _ for private variables
+* use CamelCase for class names
+* use docstrings for public methods and functions

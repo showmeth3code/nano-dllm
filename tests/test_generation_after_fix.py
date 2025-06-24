@@ -1,6 +1,9 @@
-import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from nanovllm.llm import LLM
+
+def _import_generation_after_fix_deps():
+    import torch
+    from transformers import AutoTokenizer, AutoModelForCausalLM
+    from nanovllm.llm import LLM
+    return torch, AutoTokenizer, AutoModelForCausalLM, LLM
 
 def test_model_generations():
     """Compare HuggingFace and nano-vllm generations to verify the fix."""
@@ -14,6 +17,7 @@ def test_model_generations():
     
     # Load HuggingFace model
     print("\nLoading HuggingFace model...")
+    torch, AutoTokenizer, AutoModelForCausalLM, LLM = _import_generation_after_fix_deps()
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     hf_model = AutoModelForCausalLM.from_pretrained(
         model_name,

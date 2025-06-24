@@ -8,9 +8,17 @@ import logging
 # Set up logging to see debug information
 logging.basicConfig(level=logging.DEBUG)
 
+def _import_causal_mask_multi_deps():
+    import torch
+    import torch.nn.functional as F
+    from transformers import AutoTokenizer, AutoModelForCausalLM
+    from nanovllm.llm import LLM
+    from nanovllm.sampling_params import SamplingParams
+    return torch, F, AutoTokenizer, AutoModelForCausalLM, LLM, SamplingParams, logging
 # Create a test to verify causal mask behavior with multiple tokens
 def test_causal_mask():
     device = torch.device("mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu")
+    torch, F, AutoTokenizer, AutoModelForCausalLM, LLM, SamplingParams, logging = _import_causal_mask_multi_deps()
     print(f"Using device: {device}")
     
     # Load both our model and HF model for comparison
