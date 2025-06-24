@@ -92,3 +92,4 @@ class Sampler(nn.Module):
         # Convert to tensor on original device
         result = torch.tensor(next_token_ids, device=device)
         return result
+
