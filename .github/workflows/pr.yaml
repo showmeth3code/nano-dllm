@@ -24,12 +24,26 @@ jobs:
           uv venv .venv
           source .venv/bin/activate
 
-      - name: Install dependencies with uv
+      - name: Install dev dependencies with uv
         run: |
           source .venv/bin/activate
-          uv sync
+          uv sync --dev
 
       - name: Run tests with uv
         run: |
           source .venv/bin/activate
-          uv run pytest tests/ --maxfail=3 --disable-warnings  --durations=10  -v -rA --tb=short
+          uv run pytest tests/ --maxfail=3 --disable-warnings  --durations=10  -v -rA --tb=short --junitxml=pytest-results.xml --cov=nanovllm --cov-report=xml
+
+      - name: Upload pytest results
+        if: always() && !env.ACT
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results
+          path: pytest-results.xml
+
+      - name: Upload coverage report
+        if: always() && !env.ACT
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
