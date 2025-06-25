@@ -1,3 +1,8 @@
+# Register custom pytest marks
+[tool.pytest.ini_options]
+markers = [
+    "heavy: marks tests as heavy (deselect with '-m \"not heavy\"')"
+]
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
