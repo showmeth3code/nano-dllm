@@ -27,6 +27,11 @@ class LinearBase(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError
 
+    def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor, shard_id: int | None = None):
+        """Default weight loading behavior"""
+        assert param.size() == loaded_weight.size()
+        param.data.copy_(loaded_weight)
+
 
 class ReplicatedLinear(LinearBase):
 
@@ -38,54 +43,16 @@ class ReplicatedLinear(LinearBase):
     ):
         super().__init__(input_size, output_size)
         self.weight = nn.Parameter(torch.empty(self.output_size, self.input_size))
-        self.weight.weight_loader = self.weight_loader
         if bias:
             self.bias = nn.Parameter(torch.empty(self.output_size))
-            self.bias.weight_loader = self.weight_loader
         else:
             self.register_parameter("bias", None)
-
-    def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor):
-        assert param.size() == loaded_weight.size()
-        param.data.copy_(loaded_weight)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return F.linear(x, self.weight, self.bias)
 
 
-class ColumnParallelLinear(LinearBase):
-
-    def __init__(
-        self,
-        input_size: int,
-        output_size: int,
-        bias: bool = False,
-    ):
-        super().__init__(input_size, output_size, 0)
-        self.input_size_per_partition = input_size
-        self.output_size_per_partition = divide(output_size, self.tp_size)
-
-        self.weight = nn.Parameter(torch.empty(self.output_size_per_partition, self.input_size))
-        self.weight.weight_loader = self.weight_loader
-        if bias:
-            self.bias = nn.Parameter(torch.empty(self.output_size_per_partition))
-            self.bias.weight_loader = self.weight_loader
-        else:
-            self.register_parameter("bias", None)
-
-    def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor):
-        param_data = param.data
-        shard_size = param_data.size(self.tp_dim)
-        start_idx = self.tp_rank * shard_size
-        loaded_weight = loaded_weight.narrow(self.tp_dim, start_idx, shard_size)
-        assert param_data.size() == loaded_weight.size()
-        param_data.copy_(loaded_weight)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return F.linear(x, self.weight, self.bias)
-
-
-class MergedColumnParallelLinear(ColumnParallelLinear):
+class MergedColumnParallelLinear(LinearBase):
 
     def __init__(
         self,
@@ -93,17 +60,45 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
         output_sizes: list[int],
         bias: bool = False,
     ):
+        output_size = sum(output_sizes)
+        super().__init__(input_size, output_size, tp_dim=0)
         self.output_sizes = output_sizes
-        super().__init__(input_size, sum(output_sizes), bias=bias)
+        self.output_splits = [divide(x, self.tp_size) for x in output_sizes]
+        self.weight = nn.Parameter(
+            torch.empty(divide(self.output_size, self.tp_size), self.input_size)
+        )
+        if bias:
+            self.bias = nn.Parameter(
+                torch.empty(divide(self.output_size, self.tp_size))
+            )
+        else:
+            self.register_parameter("bias", None)
 
-    def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor, loaded_shard_id: int):
-        param_data = param.data
-        shard_offset = sum(self.output_sizes[:loaded_shard_id]) // self.tp_size
-        shard_size = self.output_sizes[loaded_shard_id] // self.tp_size
-        param_data = param_data.narrow(self.tp_dim, shard_offset, shard_size)
-        loaded_weight = loaded_weight.chunk(self.tp_size, self.tp_dim)[self.tp_rank]
-        assert param_data.size() == loaded_weight.size()
-        param_data.copy_(loaded_weight)
+    def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor, shard_id: int | None = None):
+        if self.tp_size > 1:
+            assert shard_id is not None
+            # Handle sharding for tensor parallelism
+            assert loaded_weight.dim() == 2
+            out_size, in_size = loaded_weight.size()
+            shard_size = out_size // self.tp_size
+            loaded_weight = loaded_weight.narrow(0, shard_id * shard_size, shard_size)
+        
+        assert param.size() == loaded_weight.size()
+        param.data.copy_(loaded_weight)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return F.linear(x, self.weight, self.bias)
+
+
+class ColumnParallelLinear(MergedColumnParallelLinear):
+
+    def __init__(
+        self,
+        input_size: int,
+        output_size: int,
+        bias: bool = False,
+    ):
+        super().__init__(input_size, [output_size], bias)
 
 
 class QKVParallelLinear(ColumnParallelLinear):
@@ -152,28 +147,132 @@ class RowParallelLinear(LinearBase):
         output_size: int,
         bias: bool = False,
     ):
-        super().__init__(input_size, output_size, 1)
-        self.input_size_per_partition = divide(input_size, self.tp_size)
-        self.output_size_per_partition = output_size
-
-        self.weight = nn.Parameter(torch.empty(self.output_size, self.input_size_per_partition))
-        self.weight.weight_loader = self.weight_loader
+        super().__init__(input_size, output_size, tp_dim=1)
+        self.input_size_per_partition = divide(self.input_size, self.tp_size)
+        self.weight = nn.Parameter(
+            torch.empty(self.output_size, self.input_size_per_partition)
+        )
         if bias:
             self.bias = nn.Parameter(torch.empty(self.output_size))
-            self.bias.weight_loader = self.weight_loader
         else:
             self.register_parameter("bias", None)
 
-    def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor):
-        param_data = param.data
-        shard_size = param_data.size(self.tp_dim)
-        start_idx = self.tp_rank * shard_size
-        loaded_weight = loaded_weight.narrow(self.tp_dim, start_idx, shard_size)
-        assert param_data.size() == loaded_weight.size()
-        param_data.copy_(loaded_weight)
+    def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor, shard_id: int | None = None):
+        if self.tp_size > 1:
+            assert shard_id is not None
+            # Handle sharding for tensor parallelism
+            assert loaded_weight.dim() == 2
+            out_size, in_size = loaded_weight.size()
+            shard_size = in_size // self.tp_size
+            loaded_weight = loaded_weight.narrow(1, shard_id * shard_size, shard_size)
+            
+        assert param.size() == loaded_weight.size()
+        param.data.copy_(loaded_weight)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        y = F.linear(x, self.weight, self.bias if self.tp_rank == 0 else None)
+        # Local output
+        output = F.linear(x, self.weight, None)  # Bias is applied after all-gather
+        
         if self.tp_size > 1:
-            dist.all_reduce(y)
-        return y
+            # All-reduce across tensor parallel group
+            dist.all_reduce(output)
+            
+        if self.bias is not None:
+            output = output + self.bias
+            
+        return output
+
+
+class QKVLinear(nn.Module):
+    """Linear layer with QKV projections and bias"""
+    
+    def __init__(
+        self,
+        hidden_size: int,
+        num_attention_heads: int,
+        num_key_value_heads: int,
+        head_dim: int,
+        bias: bool = True
+    ):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.num_attention_heads = num_attention_heads 
+        self.num_key_value_heads = num_key_value_heads
+        self.head_dim = head_dim
+        
+        # Q projection
+        self.q = nn.Linear(hidden_size, num_attention_heads * head_dim, bias=bias)
+        
+        # K projection  
+        self.k = nn.Linear(hidden_size, num_key_value_heads * head_dim, bias=bias)
+        
+        # V projection
+        self.v = nn.Linear(hidden_size, num_key_value_heads * head_dim, bias=bias)
+
+    def forward(self, hidden_states: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        q = self.q(hidden_states)
+        k = self.k(hidden_states)  
+        v = self.v(hidden_states)
+        return q, k, v
+
+
+class ColumnParallelLinear(nn.Module):
+    """Column-parallel linear layer for tensor parallelism"""
+    
+    def __init__(
+        self,
+        input_size: int,
+        output_size: int,
+        bias: bool = True,
+        gather_output: bool = True
+    ):
+        super().__init__()
+        self.input_size = input_size
+        self.output_size = output_size
+        self.gather_output = gather_output
+        
+        # Create the weight and bias parameters
+        self.weight = nn.Parameter(torch.empty(output_size, input_size))
+        if bias:
+            self.bias = nn.Parameter(torch.empty(output_size))
+        else:
+            self.register_parameter('bias', None)
+            
+        # Initialize parameters
+        nn.init.normal_(self.weight, mean=0.0, std=0.02)
+        if self.bias is not None:
+            nn.init.zeros_(self.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return F.linear(x, self.weight, self.bias)
+
+
+class RowParallelLinear(nn.Module):
+    """Row-parallel linear layer for tensor parallelism"""
+    
+    def __init__(
+        self,
+        input_size: int,
+        output_size: int,
+        bias: bool = True,
+        input_is_parallel: bool = False
+    ):
+        super().__init__()
+        self.input_size = input_size
+        self.output_size = output_size
+        self.input_is_parallel = input_is_parallel
+        
+        # Create the weight and bias parameters
+        self.weight = nn.Parameter(torch.empty(output_size, input_size))
+        if bias:
+            self.bias = nn.Parameter(torch.empty(output_size))
+        else:
+            self.register_parameter('bias', None)
+            
+        # Initialize parameters
+        nn.init.normal_(self.weight, mean=0.0, std=0.02)
+        if self.bias is not None:
+            nn.init.zeros_(self.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return F.linear(x, self.weight, self.bias)
