@@ -6,6 +6,7 @@ from typing import Optional
 from .rotary_embedding import RotaryEmbedding
 from .linear import ColumnParallelLinear
 from .layernorm import RMSNorm
+from nanovllm.utils.torch_compile_utils import optional_torch_compile
 
 
 class SelfAttention(nn.Module):
@@ -53,6 +54,7 @@ class SelfAttention(nn.Module):
             base=rotary_base
         )
 
+    @optional_torch_compile
     def forward(
         self,
         hidden_states: torch.Tensor,

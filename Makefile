@@ -65,3 +65,6 @@ run-server:
 # Run GitHub Actions workflow locally with act
 act:
 	act --workflows .github/workflows/pr.yaml --job test --container-architecture linux/arm64
+
+diff-to-parent:
+	git diff parent/main -- 'nanovllm/**/*.py'

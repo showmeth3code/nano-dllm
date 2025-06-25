@@ -1,5 +1,7 @@
+
 import torch
 from torch import nn
+from nanovllm.utils.torch_compile_utils import optional_torch_compile
 
 
 class RMSNorm(nn.Module):
@@ -14,6 +16,7 @@ class RMSNorm(nn.Module):
         self.eps = eps
         self.weight = nn.Parameter(torch.ones(hidden_size))
 
+    @optional_torch_compile
     def rms_forward(
         self,
         x: torch.Tensor,
@@ -41,6 +44,7 @@ class RMSNorm(nn.Module):
         # Apply weight and return to original dtype, exactly as HF does
         return self.weight * x.to(input_dtype)
 
+    @optional_torch_compile
     def add_rms_forward(
         self,
         x: torch.Tensor,
@@ -82,6 +86,7 @@ class RMSNorm(nn.Module):
         
         return x, residual_out
 
+    @optional_torch_compile
     def forward(
         self,
         x: torch.Tensor,
