@@ -135,7 +135,12 @@ def load_model(model: nn.Module, path: str):
     missing_mappings = [k for k in state_dict.keys() if not any(v == k for v in key_mapping.values())]
     if missing_mappings:
         print(f"WARNING: {len(missing_mappings)} keys in model don't have a mapping from reference model.")
-        print(f"First few missing keys: {missing_mappings[:5]}")
+        print(f"First few missing keys: {missing_mappings[:10]}")
+
+    # Print all reference keys that were not matched
+    if unmatched_keys:
+        print(f"WARNING: {len(unmatched_keys)} reference keys were not matched to model keys.")
+        print(f"First few unmatched reference keys: {unmatched_keys[:10]}")
     
     # Copy weights from reference state dict
     weights_copied = 0
@@ -145,12 +150,10 @@ def load_model(model: nn.Module, path: str):
     for k_ref, k_model in key_mapping.items():
         ref_tensor = ref_state_dict[k_ref]
         model_tensor = state_dict[k_model]
-        
         # Handle shape mismatches
         if ref_tensor.shape != model_tensor.shape:
-            print(f"Shape mismatch for {k_ref} -> {k_model}: {ref_tensor.shape} vs {model_tensor.shape}")
+            print(f"SHAPE MISMATCH: {k_ref} -> {k_model}: {ref_tensor.shape} vs {model_tensor.shape}")
             shape_mismatches += 1
-            
             # Try to copy if embedding or lm_head with vocab mismatch
             if "embed_tokens" in k_model or "lm_head" in k_model:
                 if ref_tensor.shape[0] >= model_tensor.shape[0]:  # Can truncate
@@ -158,25 +161,24 @@ def load_model(model: nn.Module, path: str):
                         # Slice in dimension 0 (vocab dimension) and ensure correct device
                         device = model_tensor.device
                         truncated_tensor = ref_tensor[:model_tensor.shape[0], ...].to(device=device, dtype=model_tensor.dtype)
-                        
                         # Debug check for NaNs
                         if torch.isnan(truncated_tensor).any():
                             print(f"WARNING: NaN values found in truncated tensor for {k_model}")
-                        
                         model_tensor.copy_(truncated_tensor)
                         weights_copied += 1
                         continue
                     except Exception as e:
                         print(f"Failed to copy truncated weight: {e}")
+            # Print a warning for all other shape mismatches
+            else:
+                print(f"WARNING: Skipping weight for {k_model} due to shape mismatch.")
         else:
             # Same shape, copy directly - ensure correct device and dtype
             device = model_tensor.device
             converted_tensor = ref_tensor.to(device=device, dtype=model_tensor.dtype)
-            
             # Debug check for NaNs
             if torch.isnan(converted_tensor).any():
                 print(f"WARNING: NaN values found in converted tensor for {k_model}")
-            
             model_tensor.copy_(converted_tensor)
             weights_copied += 1
     
