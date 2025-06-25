@@ -1,6 +1,7 @@
 import pickle
 import torch
 import torch.distributed as dist
+from array import array
 from multiprocessing.synchronize import Event
 from multiprocessing.shared_memory import SharedMemory
 
@@ -45,6 +46,15 @@ class ModelRunner:
                 dist.barrier()
                 self.shm = SharedMemory(name="nanovllm")
                 self.loop()
+
+    def warmup(self):
+        x = torch.cuda.max_memory_reserved()
+        max_num_batched_tokens, max_model_len = self.config.max_num_batched_tokens, self.config.max_model_len
+        assert max_num_batched_tokens % max_model_len == 0
+        seqs = [Sequence([0] * (max_model_len + (i < max_num_batched_tokens % max_model_len))) for i in range(max_num_batched_tokens // max_model_len)]
+        self.run(seqs, True)
+        y = torch.cuda.max_memory_reserved()
+        print(y - x)
 
     def exit(self):
         if self.world_size > 1:
@@ -94,9 +104,11 @@ class ModelRunner:
         hf_config = config.hf_config
         free, total = torch.cuda.mem_get_info()
         used = total - free
+        print(free, used)
         num_kv_heads = hf_config.num_key_value_heads // self.world_size
         block_bytes = 2 * hf_config.num_hidden_layers * self.block_size * num_kv_heads * hf_config.head_dim * hf_config.torch_dtype.itemsize
         config.num_kvcache_blocks = int(total * gpu_memory_utilization - used) // block_bytes
+        torch.cuda.empty_cache()
         self.kv_cache = torch.zeros(2, hf_config.num_hidden_layers, config.num_kvcache_blocks, self.block_size, num_kv_heads, hf_config.head_dim)
         layer_id = 0
         for module in self.model.modules():
@@ -108,7 +120,7 @@ class ModelRunner:
     def prepare_block_tables(self, seqs: list[Sequence]):
         max_len = max(len(seq.block_table) for seq in seqs)
         block_tables = [
-            seq.block_table + [-1] * (max_len - len(seq.block_table))
+            seq.block_table + array('i', [-1] * (max_len - len(seq.block_table)))
             for seq in seqs
         ]
         block_tables = torch.tensor(block_tables, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
@@ -133,6 +145,7 @@ class ModelRunner:
             cu_seqlens_k.append(cu_seqlens_k[-1] + seqlen_k)
             max_seqlen_q = max(seqlen_q, max_seqlen_q)
             max_seqlen_k = max(seqlen_k, max_seqlen_k)
+            if not seq.block_table: continue
             for i in range(seq.num_cached_blocks, seq.num_blocks):
                 start = seq.block_table[i] * self.block_size
                 if i != seq.num_blocks - 1:
@@ -140,7 +153,6 @@ class ModelRunner:
                 else:
                     end = start + seq.last_block_num_tokens 
                 slot_mapping.extend(list(range(start, end)))
-        assert len(input_ids) == len(slot_mapping)
         if cu_seqlens_k[-1] > cu_seqlens_q[-1]:    # prefix cache
             block_tables = self.prepare_block_tables(seqs)
         input_ids = torch.tensor(input_ids, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
@@ -152,19 +164,19 @@ class ModelRunner:
         return input_ids, positions
 
     def prepare_decode(self, seqs: list[Sequence]):
-        input_ids = []
-        positions = []
-        slot_mapping = []
-        context_lens = []
+        input_ids = array('l')
+        positions = array('l')
+        slot_mapping = array('i')
+        context_lens = array('i')
         for seq in seqs:
             input_ids.append(seq.last_token)
             positions.append(len(seq))
             context_lens.append(len(seq))
             slot_mapping.append(seq.block_table[-1] * self.block_size + seq.last_block_num_tokens  - 1)
-        input_ids = torch.tensor(input_ids, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
-        positions = torch.tensor(positions, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
-        slot_mapping = torch.tensor(slot_mapping, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
-        context_lens = torch.tensor(context_lens, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
+        input_ids = torch.frombuffer(input_ids, dtype=torch.int64).pin_memory().cuda(non_blocking=True)
+        positions = torch.frombuffer(positions, dtype=torch.int64).pin_memory().cuda(non_blocking=True)
+        slot_mapping = torch.frombuffer(slot_mapping, dtype=torch.int32).pin_memory().cuda(non_blocking=True)
+        context_lens = torch.frombuffer(context_lens, dtype=torch.int32).pin_memory().cuda(non_blocking=True)
         block_tables = self.prepare_block_tables(seqs)
         set_context(False, slot_mapping=slot_mapping, context_lens=context_lens, block_tables=block_tables)
         return input_ids, positions

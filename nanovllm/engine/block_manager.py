@@ -1,6 +1,6 @@
+from array import array
 from collections import deque
 import xxhash
-import numpy as np
 
 from nanovllm.engine.sequence import Sequence
 
@@ -13,7 +13,7 @@ class Block:
         self.hash = -1
         self.token_ids = []
 
-    def update(self, hash: int, token_ids: list[int]):
+    def update(self, hash: int, token_ids: array):
         self.hash = hash
         self.token_ids = token_ids
 
@@ -34,11 +34,11 @@ class BlockManager:
         self.used_block_ids: set[int] = set()
 
     @classmethod
-    def compute_hash(cls, token_ids: list[int], prefix: int = -1):
+    def compute_hash(cls, token_ids: array, prefix: int = -1):
         h = xxhash.xxh64()
         if prefix != -1:
             h.update(prefix.to_bytes(8, "little"))
-        h.update(np.array(token_ids).tobytes())
+        h.update(token_ids.tobytes())
         return h.intdigest()
 
     def _allocate_block(self, block_id: int) -> Block:
@@ -89,7 +89,7 @@ class BlockManager:
             if block.ref_count == 0:
                 self._deallocate_block(block_id)
         seq.num_cached_tokens = 0
-        seq.block_table.clear()
+        seq.block_table = array('i')
 
     def can_append(self, seq: Sequence) -> bool:
         return len(self.free_block_ids) >= (len(seq) % self.block_size == 1)
