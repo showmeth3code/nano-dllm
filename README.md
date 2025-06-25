@@ -1,3 +1,10 @@
+This repo contains Nano-vLLM with modifications for Mac MPS support and examples apps (i.e. openai compatible server).
+
+<p align="center">
+  <img src="./docs/media/swagger.png" alt="Nano-vLLM Swagger UI" width="600"/>
+</p>
+
+
 # Nano-vLLM
 
 A lightweight vLLM implementation built from scratch.
