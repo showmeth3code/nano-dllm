@@ -25,11 +25,9 @@ class Block:
         return self.used_tokens < self.block_shape[0]
 
     def update(self, num_new_tokens: int = 1):
-        """写入 token 时调用，自动递增 used_tokens。"""
         self.used_tokens += num_new_tokens
 
     def reset(self):
-        """复用或新分配时重置 block 状态。"""
         self.used_tokens = 0
         self.status = "FREE"
         self.ref_count = 0
@@ -128,7 +126,6 @@ class BlockManager:
             node.block_info.status = "SWAPPED_OUT"
 
         if block.ref_count == 0:
-            # ✅ 可以立即复用
             print(f"  -> Block {block_id} ready for reuse.")
             self.lru_cache.pop(block_id, None)
             self.free_block_ids.append(block_id)
@@ -148,13 +145,9 @@ class BlockManager:
         
         while processed_tokens_len < len(seq.token_ids):
             current_prefix = seq.token_ids[:processed_tokens_len]
-            
-            # 1. 寻找从当前位置开始的最长匹配前缀
             longest_match_node = None
             
             temp_node = self.trie.get_node(current_prefix) or self.trie.root
-            
-            # 从当前已处理的位置继续向下探索Trie
             for i in range(processed_tokens_len, len(seq.token_ids)):
                 token = seq.token_ids[i]
                 if token in temp_node.children:
@@ -163,21 +156,15 @@ class BlockManager:
                         longest_match_node = temp_node
                 else:
                     break
-            
-            # 2. 根据匹配结果进行处理
             if longest_match_node:
                 cached_block_info = longest_match_node.block_info
-                
-                # 2a. 如果块在CPU，先换入
                 if cached_block_info.status == "SWAPPED_OUT":
                     self.swap_in(cached_block_info.block_id)
-                
-                # 2b. CoW 检查: 当前请求的序列是否与缓存块的序列完全一致（或为其前缀）
                 cached_len = len(cached_block_info.full_token_ids)
                 is_pure_prefix = (len(seq.token_ids) >= cached_len and 
                                   seq.token_ids[:cached_len] == cached_block_info.full_token_ids)
 
-                if is_pure_prefix: # 纯净匹配，安全共享
+                if is_pure_prefix:
                     cached_block = self.blocks[cached_block_info.block_id]
                     print(f"  -> Clean cache hit! Sharing Block {cached_block.block_id} for prefix {cached_block_info.full_token_ids}.")
                     cached_block.ref_count += 1
@@ -191,8 +178,6 @@ class BlockManager:
                     
                     src_block = self.blocks[cached_block_info.block_id]
                     dst_block = self._allocate_new_block()
-                    
-                    # 计算需要拷贝的公共前缀长度
                     fork_len = 0
                     min_len = min(len(seq.token_ids), cached_len)
                     for k in range(processed_tokens_len, min_len):
@@ -204,8 +189,6 @@ class BlockManager:
                     num_tokens_to_copy = fork_len
 
                     print(f"  -> Calling Triton Kernel to copy {num_tokens_to_copy} tokens from Block {src_block.block_id} to {dst_block.block_id}.")
-                    
-                    # >>>>>>>> 调用导入的 Triton 算子 <<<<<<<<
                     copy_kv_prefix_host(
                         src_block.gpu_tensor,
                         dst_block.gpu_tensor,
@@ -215,15 +198,10 @@ class BlockManager:
                     new_block_info = BlockInfo(dst_block.block_id, seq.token_ids[:processed_tokens_len + 1])
                     anchor_node = self.trie.get_or_create_node(new_block_info.full_token_ids)
                     anchor_node.block_info = new_block_info
-
-                    # 映射关系
                     self.block_to_node_map[dst_block.block_id] = anchor_node
-
-                    # 更新序列 block 表
                     seq.block_table.append(dst_block.block_id)
                     processed_tokens_len = len(new_block_info.full_token_ids)
             else:
-                # 3. 缓存未命中
                 print(f"  -> Cache miss. Allocating new block.")
                 new_block = self._allocate_new_block()
                 
@@ -271,23 +249,16 @@ class BlockManager:
     def can_append(self, seq: Sequence) -> bool:
         if seq.status != SequenceStatus.RUNNING:
             return False
-
-        # 当前 sequence 最后一个 block 是否还有空间
         last_block_id = seq.block_table[-1] if seq.block_table else None
         if last_block_id is not None:
             block = self.blocks[last_block_id]
-            if block.has_space():  # 你可以定义 has_space() 来判断 block 是否还能追加
+            if block.has_space():
                 return True
-
-        # 如果当前有空闲 block 可以分配，也可以 append
         return bool(self.free_block_ids) or self._can_swap_out_for_allocation()
     
     def can_allocate(self, seq: Sequence) -> bool:
-        # 需要多少个 block
         num_blocks_needed = (len(seq.token_ids) + self.block_size - 1) // self.block_size
-        # 空闲 block 数量
         num_free = len(self.free_block_ids)
-        # 可 swap out 的 block 数量
         num_evictable = sum(
             1 for b in self.blocks if b.ref_count == 0 and b.status == "Free"
         )
@@ -299,8 +270,6 @@ class BlockManager:
             if block.has_space():
                 block.ref_count += 1
                 return
-
-        # 否则分配新 block（可能触发 eviction）
         new_block = self._allocate_new_block()
         new_block.ref_count = 1
         new_block.status = "IN_GPU"
