@@ -52,7 +52,19 @@ See `bench.py` for benchmark.
 | vLLM           | 133,966     | 98.37    | 1361.84               |
 | Nano-vLLM      | 133,966     | 93.41    | 1434.13               |
 
+## Run Nano-vllm on AMD GPU
+### CDNA3 datacenter GPUs
+Access AMD CDNA3 datacenter GPU through [AMD developer cloud] (https://www.amd.com/en/developer/resources/cloud-access/amd-developer-cloud.html).It is stronly advised to use the pre-built vLLM GPU instance, which has already installed Triton and Rocm version flash attention library.if you have other MI300 GPU resource, you could try the docker image of rocm/vllm:latest to run nano-vllm
 
+### RDNA3/4 Desktop GPUs 
+1) use the pre-built rocm docker image to setup ROCM, like rocm/pytorch:latest
+2) install the rocm-version flash triton library
+   a. git clone --recursive https://github.com/Dao-AILab/flash-attention.git
+   b. cd flash-attention 
+   c. FLASH_ATTENTION_TRITON_AMD_ENABLE="TRUE" python setup.py install 
+3) install nano-vllm
+4) run benchmark: FLASH_ATTENTION_TRITON_AMD_ENABLE="TRUE" python3 bench.py
+   
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=GeeeekExplorer/nano-vllm&type=Date)](https://www.star-history.com/#GeeeekExplorer/nano-vllm&Date)
