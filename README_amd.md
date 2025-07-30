@@ -41,9 +41,9 @@ See `bench.py` for benchmark.
 
 **Test Configuration:**
 - Hardware:
-    - Setup 1: Radeon RX7900XT (20GB)
+    - Setup 1: Radeon RX7900XTX (24GB)
     - Setup 2: Instinct MI300X (192GB) 
-    - Setup 3: Ryzen AI 395(128GB unified memory)
+    - Setup 3: Ryzen AI 395(64GB VRAM within 128GB unified memory)
     - Setup 4: Radeon RX9070XT (16GB) 
 - Model: Qwen3-0.6B
 - Total Requests: 256 sequences
@@ -53,8 +53,10 @@ See `bench.py` for benchmark.
 **Setup 1 Performance Results:**
 | Inference Engine | Output Tokens | Time (s) | Throughput (tokens/s) |
 |----------------|-------------|----------|-----------------------|
-| vLLM           | 133,966     | 61.80    | 2167.84               |
-| Nano-vLLM      | 133,966     | 65.91    | 2032.36               |
+| vLLM           | 133,966     | 41.00    | 3295.00               |
+| Nano-vLLM      | 124754      | 35.74    | 3287.95               |
+
+* num_seqs=206 w/ Nano-vLLM for 24GB VRAM of RX7900XTX
 
 **Setup 2 Performance Results:**
 | Inference Engine | Output Tokens | Time (s) | Throughput (tokens/s) |
@@ -72,6 +74,6 @@ See `bench.py` for benchmark.
 | Inference Engine | Output Tokens | Time (s) | Throughput (tokens/s) |
 |----------------|-------------|----------|-----------------------|
 | vLLM           | 133,966     | 47.12    | 2842.8                |
-| Nano-vLLM      | 133,966     | *        |        *              |
+| Nano-vLLM      | 133,966     | 23.97    | 2626.39               |
 
-*Known issue: nano-vllm has memory access fault issue on RX9070XT to be fixed.
+* num_seqs=110 w/ Nano-vLLM for 16GB VRAM of RX9070XT
