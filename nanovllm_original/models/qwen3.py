@@ -8,7 +8,7 @@ from nanovllm.layers.attention import Attention
 from nanovllm.layers.layernorm import RMSNorm
 from nanovllm.layers.linear import QKVParallelLinear, MergedColumnParallelLinear, RowParallelLinear
 from nanovllm.layers.rotary_embedding import get_rope
-from nanovllm.layers.embed_head import VocabParallelEmbedding, ParallelLMHead
+from nanovllm.layers.embed_head  import VocabParallelEmbedding, ParallelLMHead
 
 
 class Qwen3Attention(nn.Module):
@@ -39,9 +39,6 @@ class Qwen3Attention(nn.Module):
         self.kv_size = self.num_kv_heads * self.head_dim
         self.scaling = self.head_dim**-0.5
         self.rope_theta = rope_theta
-
-        # [Qwen3Attention] num_heads: 16, head_dim: 128, q_size: 2048, kv_size: 1024, scaling: 0.08838834764831845, rope_theta: 1000000
-        print(f"[Qwen3Attention] num_heads: {self.num_heads}, head_dim: {self.head_dim}, q_size: {self.q_size}, kv_size: {self.kv_size}, scaling: {self.scaling}, rope_theta: {self.rope_theta}")
 
         self.qkv_proj = QKVParallelLinear(
             hidden_size,
@@ -75,21 +72,15 @@ class Qwen3Attention(nn.Module):
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
     ) -> torch.Tensor:
-        # [B, 1024] -> [B, 4096] if tp = 1
         qkv = self.qkv_proj(hidden_states)
-        # q = [B, 2048], k = [B, 1024], v = [B, 1024]
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
-        # q = [B, 16, 128], k = [B, 8, 128], v = [B, 8, 128]
         q_by_head = q.view(-1, self.num_heads, self.head_dim)
         q_by_head = self.q_norm(q_by_head)
         q = q_by_head.view(q.shape)
         k_by_head = k.view(-1, self.num_kv_heads, self.head_dim)
         k_by_head = self.k_norm(k_by_head)
         k = k_by_head.view(k.shape)
-        # q = [B, 16, 128], k = [B, 16, 128], v = [B, 8, 128]
-        print(f"[Qwen3Attention] after qkv_proj, q: {q.shape}, k: {k.shape}, v: {v.shape}")
         q, k = self.rotary_emb(positions, q, k)
-        print(f"[Qwen3Attention] before attn, q: {q.shape}, k: {k.shape}, v: {v.shape}")
         o = self.attn(q, k, v)
         output = self.o_proj(o)
         return output
@@ -104,7 +95,6 @@ class Qwen3MLP(nn.Module):
         hidden_act: str,
     ) -> None:
         super().__init__()
-        # [b, s, d] * [d, 2 * d] = [b, s, 2 * d]
         self.gate_up_proj = MergedColumnParallelLinear(
             hidden_size,
             [intermediate_size] * 2,
@@ -144,8 +134,6 @@ class Qwen3DecoderLayer(nn.Module):
             rope_theta=getattr(config, "rope_theta", 1000000),
             rope_scaling=getattr(config, "rope_scaling", None),
         )
-        # up: [b, s, 1024] * [1024, 3072] = [b, s, 3072]
-        # down: [b, s, 3072] * [3072, 1024] = [b, s, 1024]
         self.mlp = Qwen3MLP(
             hidden_size=config.hidden_size,
             intermediate_size=config.intermediate_size,
@@ -166,14 +154,12 @@ class Qwen3DecoderLayer(nn.Module):
             residual = hidden_states
             hidden_states = self.input_layernorm(hidden_states)
         else:
-            hidden_states, residual = self.input_layernorm(
-                hidden_states, residual)
+            hidden_states, residual = self.input_layernorm(hidden_states, residual)
         hidden_states = self.self_attn(
             positions=positions,
             hidden_states=hidden_states,
         )
-        hidden_states, residual = self.post_attention_layernorm(
-            hidden_states, residual)
+        hidden_states, residual = self.post_attention_layernorm(hidden_states, residual)
         hidden_states = self.mlp(hidden_states)
         return hidden_states, residual
 
@@ -185,14 +171,9 @@ class Qwen3Model(nn.Module):
         config: Qwen3Config,
     ):
         super().__init__()
-        # [V, d] = [151936, 1024]
         self.vocab_size = config.vocab_size
-        self.embed_tokens = VocabParallelEmbedding(
-            config.vocab_size, config.hidden_size)
-        print(f"vocab_size: {self.vocab_size}")
-        # [b, s, d] = [1, 2048, 1024]
-        self.layers = nn.ModuleList(
-            [Qwen3DecoderLayer(config) for _ in range(config.num_hidden_layers)])
+        self.embed_tokens = VocabParallelEmbedding(config.vocab_size, config.hidden_size)
+        self.layers = nn.ModuleList([Qwen3DecoderLayer(config) for _ in range(config.num_hidden_layers)])
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
@@ -200,11 +181,7 @@ class Qwen3Model(nn.Module):
         input_ids: torch.Tensor,
         positions: torch.Tensor,
     ) -> torch.Tensor:
-        # V = [151936, 1024], input_ids = [28], TP=2, V -> V/2, V/2
         hidden_states = self.embed_tokens(input_ids)
-        # torch.Size([28]), hidden: [28, 1024], positions: [28]
-        print(
-            f"[Qwen3Model] input_ids: {input_ids.shape}, positions: {positions.shape}, hidden_states: {hidden_states.shape}, positions: {positions}")
         residual = None
         for layer in self.layers:
             hidden_states, residual = layer(
@@ -230,9 +207,7 @@ class Qwen3ForCausalLM(nn.Module):
         config: Qwen3Config
     ):
         super().__init__()
-        print(f"qwen3 config: {config}")
         self.model = Qwen3Model(config)
-        # [V, d] = [151936, 1024]
         self.lm_head = ParallelLMHead(config.vocab_size, config.hidden_size)
         self.tie_word_embeddings = config.tie_word_embeddings
         if self.tie_word_embeddings:

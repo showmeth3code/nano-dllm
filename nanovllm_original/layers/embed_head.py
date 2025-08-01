@@ -14,7 +14,7 @@ class VocabParallelEmbedding(nn.Module):
         embedding_dim: int,
     ):
         super().__init__()
-        self.tp_rank = dist.get_rank()  # 每个显卡的编号
+        self.tp_rank = dist.get_rank()
         self.tp_size = dist.get_world_size()
         assert num_embeddings % self.tp_size == 0
         self.num_embeddings = num_embeddings
@@ -22,15 +22,8 @@ class VocabParallelEmbedding(nn.Module):
         self.vocab_start_idx = self.num_embeddings_per_partition * self.tp_rank
         self.vocab_end_idx = self.vocab_start_idx + self.num_embeddings_per_partition
         self.embedding_dim = embedding_dim
-        self.weight = nn.Parameter(torch.empty(
-            self.num_embeddings_per_partition, embedding_dim))
+        self.weight = nn.Parameter(torch.empty(self.num_embeddings_per_partition, embedding_dim))
         self.weight.weight_loader = self.weight_loader
-        print(f"[VocabParallelEmbedding] rank {self.tp_rank}/{self.tp_size}: "
-              f"global vocab size={self.num_embeddings}, "
-              f"local partition size={self.num_embeddings_per_partition}, "
-              f"vocab range=[{self.vocab_start_idx}, {self.vocab_end_idx}), "
-              f"embedding_dim={self.embedding_dim}, "
-              f"weight.shape={tuple(self.weight.shape)}")
 
     def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor):
         param_data = param.data
@@ -41,34 +34,14 @@ class VocabParallelEmbedding(nn.Module):
         param_data.copy_(loaded_weight)
 
     def forward(self, x: torch.Tensor):
-        # [28] @ [151936, 1024] -> [28, 1024]
         if self.tp_size > 1:
             mask = (x >= self.vocab_start_idx) & (x < self.vocab_end_idx)
             x = mask * (x - self.vocab_start_idx)
-        print(f"[VocabParallelEmbedding] forward x={x}")
         y = F.embedding(x, self.weight)
         if self.tp_size > 1:
-            y = mask.unsqueeze(1) * y  # 多增加一个维度1，得到[3,1]，然后 [3, 1] * [3, 1024] → 自动广播成 [3, 1024]
+            y = mask.unsqueeze(1) * y
             dist.all_reduce(y)
-            print(f"[VocabParallelEmbedding] [rank {self.tp_rank}] after all_reduce y.shape={tuple(y.shape)}")
-        print(f"[VocabParallelEmbedding] [rank {self.tp_rank}] x.shape={tuple(x.shape)}, "
-              f"vocab_range=[{self.vocab_start_idx},{self.vocab_end_idx}), "
-              f"weight.shape={tuple(self.weight.shape)}, "
-              f"output.shape={tuple(y.shape)}")
         return y
-
-
-# 总词表大小是 32000，tp_size = 4，则每个 GPU 处理 8000 个 token
-# rank 0: [0, 8000)
-# rank 1: [8000, 16000)
-# rank 2: [16000, 24000)
-# rank 3: [24000, 32000)
-# 假设输入的x为：
-# x = torch.tensor([15000, 16500, 25000])
-# rank 2 mask = [False, True, False]，故而 x = [0, 500, 0]
-# F.embedding(x, self.weight) 对x查找embeding，忽略0，则 [0, emb_500, 0]
-# mask.unsqueeze(1) = [False, True, False] → [3, 1] * y 进行自动广播，用于将y的第1行和第3行设置为0
-# all_reduce 得到：[emb_15000, emb_16500, emb_25000]
 
 
 class ParallelLMHead(VocabParallelEmbedding):
@@ -81,8 +54,7 @@ class ParallelLMHead(VocabParallelEmbedding):
     ):
         super().__init__(num_embeddings, embedding_dim)
         if bias:
-            self.bias = nn.Parameter(torch.empty(
-                self.num_embeddings_per_partition))
+            self.bias = nn.Parameter(torch.empty(self.num_embeddings_per_partition))
             self.bias.weight_loader = self.weight_loader
         else:
             self.register_parameter("bias", None)
@@ -94,10 +66,7 @@ class ParallelLMHead(VocabParallelEmbedding):
             x = x[last_indices].contiguous()
         logits = F.linear(x, self.weight, self.bias)
         if self.tp_size > 1:
-            all_logits = [torch.empty_like(logits) for _ in range(
-                self.tp_size)] if self.tp_rank == 0 else None
+            all_logits = [torch.empty_like(logits) for _ in range(self.tp_size)] if self.tp_rank == 0 else None
             dist.gather(logits, all_logits, 0)
             logits = torch.cat(all_logits, -1) if self.tp_rank == 0 else None
-        print(
-            f"[rank {self.tp_rank}] input.shape={tuple(x.shape)}, output.shape={tuple(logits.shape) if logits is not None else None}")
         return logits

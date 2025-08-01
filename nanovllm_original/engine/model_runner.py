@@ -11,7 +11,6 @@ from nanovllm.utils.memory import get_gpu_memory
 from nanovllm.models.qwen3 import Qwen3ForCausalLM
 from nanovllm.layers.sampler import Sampler
 from nanovllm.utils.loader import load_model
-import torchsummary
 
 
 class ModelRunner:
@@ -19,31 +18,20 @@ class ModelRunner:
     def __init__(self, config: Config, rank: int, event: Event | list[Event]):
         self.config = config
         hf_config = config.hf_config
-        self.block_size = config.kvcache_block_size  # 单个kv cache中token的个数
+        self.block_size = config.kvcache_block_size
         self.enforce_eager = config.enforce_eager
         self.world_size = config.tensor_parallel_size
         self.rank = rank
         self.event = event
-
-        dist.init_process_group(
-            "nccl", "tcp://localhost:2333", world_size=self.world_size, rank=rank)
+    
+        dist.init_process_group("nccl", "tcp://localhost:2333", world_size=self.world_size, rank=rank)
         torch.cuda.set_device(rank)
         default_dtype = torch.get_default_dtype()
         torch.set_default_dtype(hf_config.torch_dtype)
-        # 下面的代码使得在没有显式指定 device 的 tensor 构造函数，都默认是在 "cuda" 上执行，因此在 self.kv_cache = torch.zeros(...) 时，默认是在 "cuda" 上执行分配 kv cache 的 GPU 显存
         torch.set_default_device("cuda")
         self.model = Qwen3ForCausalLM(hf_config)
-
-        # 打印模型参数
-        print(f"[ModelRunner] init with rank={rank} model={self.model}")
-        # torchsummary.summary(self.model, torch.tensor([3000,2000,5000]), torch.tensor([0,1,2]))
-
-        # 先载入模型，占据GPU显存
         load_model(self.model, config.model)
         self.sampler = Sampler()
-        # 再从剩余的GPU显存分配 kv cache slot
-        print(
-            f"[ModelRunner] rank={rank} try to allocate gpu_kv_cache, current gpu_memory_utilization={config.gpu_memory_utilization}")
         self.allocate_kv_cache(config.gpu_memory_utilization)
         if not self.enforce_eager:
             self.capture_cudagraph()
@@ -52,8 +40,7 @@ class ModelRunner:
 
         if self.world_size > 1:
             if rank == 0:
-                self.shm = SharedMemory(
-                    name="nanovllm", create=True, size=2**20)
+                self.shm = SharedMemory(name="nanovllm", create=True, size=2**20)
                 dist.barrier()
             else:
                 dist.barrier()
@@ -106,20 +93,12 @@ class ModelRunner:
         total, used, _ = get_gpu_memory()
         free = total * gpu_memory_utilization - used
         num_kv_heads = hf_config.num_key_value_heads // self.world_size
-        # 单个 block 大约是 29 MB，剩余空闲显存 1.6 GB，对应约 54 个显存 kv block
-        # [2, 28, 256, 8, 128, 2] = 2*28*256*8*128*2 = 29360128 （约 29 MB）
-        block_bytes = 2 * hf_config.num_hidden_layers * self.block_size * \
-            num_kv_heads * hf_config.head_dim * hf_config.torch_dtype.itemsize
+        block_bytes = 2 * hf_config.num_hidden_layers * self.block_size * num_kv_heads * hf_config.head_dim * hf_config.torch_dtype.itemsize
         config.num_kvcache_blocks = int(free) // block_bytes
-        print(
-            f"[ModelRunner] allocate_kv_cache total={total}, used={used}, free={free}, num_kvcache_blocks={config.num_kvcache_blocks}, block_size={self.block_size}, num_kv_heads={num_kv_heads}, head_dim={hf_config.head_dim}, block_bytes={block_bytes}")
-        # 分配的显存大小是 [2, L, block_num, block_size, num_kv_heads, head_dim]
-        self.kv_cache = torch.zeros(2, hf_config.num_hidden_layers, config.num_kvcache_blocks,
-                                    self.block_size, num_kv_heads, hf_config.head_dim)
+        self.kv_cache = torch.zeros(2, hf_config.num_hidden_layers, config.num_kvcache_blocks, self.block_size, num_kv_heads, hf_config.head_dim)
         layer_id = 0
         for module in self.model.modules():
             if hasattr(module, "k_cache") and hasattr(module, "v_cache"):
-                # 每个层都有单独的 kcache 和 vcache，[num_kvcache_blocks, block_size, num_kv_heads, head_dim]
                 module.k_cache = self.kv_cache[0, layer_id]
                 module.v_cache = self.kv_cache[1, layer_id]
                 layer_id += 1
@@ -130,8 +109,7 @@ class ModelRunner:
             seq.block_table + [-1] * (max_len - len(seq.block_table))
             for seq in seqs
         ]
-        block_tables = torch.tensor(
-            block_tables, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
+        block_tables = torch.tensor(block_tables, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         return block_tables
 
     def prepare_prefill(self, seqs: list[Sequence]):
@@ -145,43 +123,31 @@ class ModelRunner:
         block_tables = None
         for seq in seqs:
             seqlen = len(seq)
-            #  把“还没写入 KV 缓存的 token”加入 input_ids，一维数组
             input_ids.extend(seq[seq.num_cached_tokens:])
-            #  把“还没写入 KV 缓存的 token”的位置 index 加入 positions，一维数组
             positions.extend(list(range(seq.num_cached_tokens, seqlen)))
-            seqlen_q = seqlen - seq.num_cached_tokens # q 用未计算的序列长度
-            seqlen_k = seqlen # k 用序列长度
-            #  计算 q、k 序列的累计长度，例如 [0, 11, 28] 表示第一个请求长度为 11，第二个请求为 17
+            seqlen_q = seqlen - seq.num_cached_tokens
+            seqlen_k = seqlen
             cu_seqlens_q.append(cu_seqlens_q[-1] + seqlen_q)
             cu_seqlens_k.append(cu_seqlens_k[-1] + seqlen_k)
-            # 计算该 batch 中最长的 q、k 序列长度
             max_seqlen_q = max(seqlen_q, max_seqlen_q)
             max_seqlen_k = max(seqlen_k, max_seqlen_k)
-            # 计算每个请求中的未命中 cache 的 block id，用它来构建 slot mapping 存储每个 token 的 cache 位置
             for i in range(seq.num_cached_blocks, seq.num_blocks):
                 start = seq.block_table[i] * self.block_size
                 if i != seq.num_blocks - 1:
                     end = start + self.block_size
                 else:
-                    end = start + seq.last_block_num_tokens
+                    end = start + seq.last_block_num_tokens 
                 slot_mapping.extend(list(range(start, end)))
         assert len(input_ids) == len(slot_mapping)
         assert len(input_ids) == cu_seqlens_q[-1]
         if cu_seqlens_k[-1] > cu_seqlens_q[-1]:    # prefix cache
             block_tables = self.prepare_block_tables(seqs)
-        input_ids = torch.tensor(
-            input_ids, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
-        positions = torch.tensor(
-            positions, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
-        cu_seqlens_q = torch.tensor(
-            cu_seqlens_q, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
-        cu_seqlens_k = torch.tensor(
-            cu_seqlens_k, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
-        slot_mapping = torch.tensor(
-            slot_mapping, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
-        set_context(True, cu_seqlens_q, cu_seqlens_k, max_seqlen_q,
-                    max_seqlen_k, slot_mapping, None, block_tables)
-        print(f"[ModelRunner] prepare_prefill input_ids={input_ids}, positions={positions}, cu_seqlens_q={cu_seqlens_q}, cu_seqlens_k={cu_seqlens_k}, max_seqlen_q={max_seqlen_q}, max_seqlen_k={max_seqlen_k}, slot_mapping={slot_mapping}, block_tables={block_tables}")
+        input_ids = torch.tensor(input_ids, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
+        positions = torch.tensor(positions, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
+        cu_seqlens_q = torch.tensor(cu_seqlens_q, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
+        cu_seqlens_k = torch.tensor(cu_seqlens_k, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
+        slot_mapping = torch.tensor(slot_mapping, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
+        set_context(True, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, slot_mapping, None, block_tables)
         return input_ids, positions
 
     def prepare_decode(self, seqs: list[Sequence]):
@@ -193,27 +159,20 @@ class ModelRunner:
             input_ids.append(seq.last_token)
             positions.append(len(seq))
             context_lens.append(len(seq))
-            slot_mapping.append(
-                seq.block_table[-1] * self.block_size + seq.last_block_num_tokens - 1)
-        input_ids = torch.tensor(
-            input_ids, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
-        positions = torch.tensor(
-            positions, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
-        slot_mapping = torch.tensor(
-            slot_mapping, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
-        context_lens = torch.tensor(
-            context_lens, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
+            slot_mapping.append(seq.block_table[-1] * self.block_size + seq.last_block_num_tokens  - 1)
+        input_ids = torch.tensor(input_ids, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
+        positions = torch.tensor(positions, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
+        slot_mapping = torch.tensor(slot_mapping, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
+        context_lens = torch.tensor(context_lens, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         block_tables = self.prepare_block_tables(seqs)
-        set_context(False, slot_mapping=slot_mapping,
-                    context_lens=context_lens, block_tables=block_tables)
+        set_context(False, slot_mapping=slot_mapping, context_lens=context_lens, block_tables=block_tables)
         return input_ids, positions
 
     def prepare_sample(self, seqs: list[Sequence]):
         temperatures = []
         for seq in seqs:
             temperatures.append(seq.temperature)
-        temperatures = torch.tensor(
-            temperatures, dtype=torch.float32, pin_memory=True).cuda(non_blocking=True)
+        temperatures = torch.tensor(temperatures, dtype=torch.float32, pin_memory=True).cuda(non_blocking=True)
         return temperatures
 
     @torch.inference_mode()
@@ -230,8 +189,7 @@ class ModelRunner:
             graph_vars["positions"][:bs] = positions
             graph_vars["slot_mapping"][:bs] = context.slot_mapping
             graph_vars["context_lens"][:bs] = context.context_lens
-            graph_vars["block_tables"][:bs,
-                                       :context.block_tables.size(1)] = context.block_tables
+            graph_vars["block_tables"][:bs, :context.block_tables.size(1)] = context.block_tables
             graph.replay()
             return self.model.compute_logits(graph_vars["outputs"][:bs])
 
@@ -242,14 +200,12 @@ class ModelRunner:
         graph_vars["slot_mapping"].zero_()
         graph_vars["context_lens"].zero_()
         graph_vars["block_tables"].zero_()
-
+    
     def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int]:
-        input_ids, positions = self.prepare_prefill(
-            seqs) if is_prefill else self.prepare_decode(seqs)
+        input_ids, positions = self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)
         temperatures = self.prepare_sample(seqs) if self.rank == 0 else None
         logits = self.run_model(input_ids, positions, is_prefill)
-        token_ids = self.sampler(
-            logits, temperatures).tolist() if self.rank == 0 else None
+        token_ids = self.sampler(logits, temperatures).tolist() if self.rank == 0 else None
         reset_context()
         return token_ids
 
@@ -260,12 +216,11 @@ class ModelRunner:
         rng_state = torch.cuda.get_rng_state()
         torch.cuda.get_rng_state = lambda: rng_state
         torch.cuda.set_rng_state = lambda _: None
-
+    
         config = self.config
         hf_config = config.hf_config
         max_bs = min(self.config.max_num_seqs, 512)
-        max_num_blocks = (config.max_model_len +
-                          self.block_size - 1) // self.block_size
+        max_num_blocks = (config.max_model_len + self.block_size - 1) // self.block_size
         input_ids = torch.zeros(max_bs, dtype=torch.int64)
         positions = torch.zeros(max_bs, dtype=torch.int64)
         slot_mapping = torch.zeros(max_bs, dtype=torch.int32)
@@ -278,13 +233,10 @@ class ModelRunner:
 
         for bs in reversed(self.graph_bs):
             graph = torch.cuda.CUDAGraph()
-            set_context(
-                False, slot_mapping=slot_mapping[:bs], context_lens=context_lens[:bs], block_tables=block_tables[:bs])
-            outputs[:bs] = self.model(
-                input_ids[:bs], positions[:bs])    # warmup
+            set_context(False, slot_mapping=slot_mapping[:bs], context_lens=context_lens[:bs], block_tables=block_tables[:bs])
+            outputs[:bs] = self.model(input_ids[:bs], positions[:bs])    # warmup
             with torch.cuda.graph(graph, self.graph_pool):
-                outputs[:bs] = self.model(
-                    input_ids[:bs], positions[:bs])    # capture
+                outputs[:bs] = self.model(input_ids[:bs], positions[:bs])    # capture
             if self.graph_pool is None:
                 self.graph_pool = graph.pool()
             self.graphs[bs] = graph

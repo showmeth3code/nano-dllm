@@ -1,5 +1,4 @@
 import os
-import time
 from glob import glob
 import torch
 from torch import nn
@@ -12,27 +11,18 @@ def default_weight_loader(param: nn.Parameter, loaded_weight: torch.Tensor):
 
 def load_model(model: nn.Module, path: str):
     packed_modules_mapping = getattr(model, "packed_modules_mapping", {})
-    print(f"packed_modules_mapping: {packed_modules_mapping}")
-    # packed_modules_mapping: {'q_proj': ('qkv_proj', 'q'), 'k_proj': ('qkv_proj', 'k'), 'v_proj': ('qkv_proj', 'v'), 'gate_proj': ('gate_up_proj', 0), 'up_proj': ('gate_up_proj', 1)}
-    begin = time.time()
     for file in glob(os.path.join(path, "*.safetensors")):
-        print(f"loading {file}")
         with safe_open(file, "pt", "cpu") as f:
             for weight_name in f.keys():
-                print(f"loading weight: {weight_name}")
                 for k in packed_modules_mapping:
                     if k in weight_name:
                         v, shard_id = packed_modules_mapping[k]
                         param_name = weight_name.replace(k, v)
-                        print(f"new param_name: {param_name}, shard_id: {shard_id}")
                         param = model.get_parameter(param_name)
                         weight_loader = getattr(param, "weight_loader")
-                        weight_loader(param, f.get_tensor(
-                            weight_name), shard_id)
+                        weight_loader(param, f.get_tensor(weight_name), shard_id)
                         break
                 else:
                     param = model.get_parameter(weight_name)
-                    weight_loader = getattr(
-                        param, "weight_loader", default_weight_loader)
+                    weight_loader = getattr(param, "weight_loader", default_weight_loader)
                     weight_loader(param, f.get_tensor(weight_name))
-        print(f"loading {file} cost {time.time() - begin:.2f} seconds")

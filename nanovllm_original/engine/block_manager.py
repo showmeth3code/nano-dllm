@@ -63,21 +63,15 @@ class BlockManager:
         h = -1
         cache_miss = False
         for i in range(seq.num_blocks):
-            # 获取该 block i 的 tokens（256 个）
             token_ids = seq.block(i)
-            # 计算 tokens 的 hash 值
             h = compute_hash(token_ids, h) if len(token_ids) == self.block_size else -1
             block_id = self.hash_to_block_id.get(h, -1)
-            # 从 hash_to_block_id 中获取 block_id，如果没有找到，则为 -1，则需要从 free_block_ids 中获取一个空闲的 block_id
-            # 只要出现一次 cache miss，随后的 block_id 都会从 free_block_ids 中获取
             if block_id == -1 or self.blocks[block_id].token_ids != token_ids:
                 cache_miss = True
             if cache_miss:
                 block_id = self.free_block_ids[0]
                 block = self._allocate_block(block_id)
             else:
-                # 对于 cache 命中的 block，可能在 free 里面，也可能在 used 里面
-                # 如果在 free 中需要将它移动到 used 里面，如果在 used 里面，只需要增加一次引用计数
                 seq.num_cached_tokens += self.block_size
                 if block_id in self.used_block_ids:
                     block = self.blocks[block_id]

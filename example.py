@@ -22,6 +22,7 @@ def main():
         )
         for prompt in prompts
     ]
+    print(f"prompts: {prompts}, sampling_params: {sampling_params}")
     outputs = llm.generate(prompts, sampling_params)
 
     for prompt, output in zip(prompts, outputs):

@@ -10,7 +10,6 @@ class Context:
     cu_seqlens_k: torch.Tensor | None = None
     max_seqlen_q: int = 0
     max_seqlen_k: int = 0
-    # 存储每个 token 在 kv cache 中的位置（例如 slot_mapping 中的元素 1000 表示是该 token 的 kv cache 对应到第 1000/256 = 3 个 block 中的 1000%256 = 232 个位置），每个 block 有 256 个位置，一共有 num_kv_cache_blocks 个 block， slot_mapping 中的每个元素一定可以映射到 kv cache 中的一个位置
     slot_mapping: torch.Tensor | None = None
     context_lens: torch.Tensor | None = None
     block_tables: torch.Tensor | None = None

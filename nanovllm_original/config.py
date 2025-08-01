@@ -1,21 +1,21 @@
 import os
 from dataclasses import dataclass
 from transformers import AutoConfig
-import logging
+
 
 @dataclass
 class Config:
     model: str
-    max_num_batched_tokens: int = 32768 # 一轮 step 处理的最大的 tokens 数目
-    max_num_seqs: int = 512 # 一轮 step 处理的最大 seq 数目
+    max_num_batched_tokens: int = 32768
+    max_num_seqs: int = 512
     max_model_len: int = 4096
     gpu_memory_utilization: float = 0.9
     tensor_parallel_size: int = 1
     enforce_eager: bool = False
     hf_config: AutoConfig | None = None
     eos: int = -1
-    kvcache_block_size: int = 256 # 单个 kvcache block 的 token 的个数
-    num_kvcache_blocks: int = -1 # GPU kvcache 缓存的 block 数目，-1 表示不缓存
+    kvcache_block_size: int = 256
+    num_kvcache_blocks: int = -1
 
     def __post_init__(self):
         assert os.path.isdir(self.model)

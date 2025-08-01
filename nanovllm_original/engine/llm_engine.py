@@ -1,5 +1,4 @@
 import atexit
-import logging
 from dataclasses import fields
 from time import perf_counter
 from tqdm.auto import tqdm
@@ -24,22 +23,13 @@ class LLMEngine:
         ctx = mp.get_context("spawn")
         for i in range(1, config.tensor_parallel_size):
             event = ctx.Event()
-            print(
-                f"[LLMEngine] init process ModelRunner {i} with tensor_parallel_size={config.tensor_parallel_size}")
-            # 每个子进程都需要一个 ModelRunner 实例
             process = ctx.Process(target=ModelRunner, args=(config, i, event))
             process.start()
             self.ps.append(process)
             self.events.append(event)
-        # Engine 主进程持有一个 ModelRunner 实例，管理一个 GPU 卡，如果是多卡并行，则每个卡都有一个 ModelRunner 实例
-        print(
-            f"[LLMEngine] init main ModelRunner with tensor_parallel_size={config.tensor_parallel_size}")
         self.model_runner = ModelRunner(config, 0, self.events)
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            config.model, use_fast=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(config.model, use_fast=True)
         config.eos = self.tokenizer.eos_token_id
-        # Engine 主进程持有一个 Scheduler 实例，负责调度 Sequence，子进程不需要持有 Scheduler 实例
-        print(f"[LLMEngine] init scheduler with config: {config}")
         self.scheduler = Scheduler(config)
         atexit.register(self.exit)
 
@@ -52,9 +42,6 @@ class LLMEngine:
     def add_request(self, prompt: str | list[int], sampling_params: SamplingParams):
         if isinstance(prompt, str):
             prompt = self.tokenizer.encode(prompt)
-        # example: add_request called twice with tokens length [11, 17]
-        print(
-            f"\n    add_request: prompt={prompt}, encoded: {len(prompt)} sampling_params={sampling_params}")
         seq = Sequence(prompt, sampling_params)
         self.scheduler.add(seq)
 
@@ -62,10 +49,8 @@ class LLMEngine:
         seqs, is_prefill = self.scheduler.schedule()
         token_ids = self.model_runner.call("run", seqs, is_prefill)
         self.scheduler.postprocess(seqs, token_ids)
-        outputs = [(seq.seq_id, seq.completion_token_ids)
-                   for seq in seqs if seq.is_finished]
-        num_tokens = sum(len(seq)
-                         for seq in seqs) if is_prefill else -len(seqs)
+        outputs = [(seq.seq_id, seq.completion_token_ids) for seq in seqs if seq.is_finished]
+        num_tokens = sum(len(seq) for seq in seqs) if is_prefill else -len(seqs)
         return outputs, num_tokens
 
     def is_finished(self):
@@ -78,11 +63,9 @@ class LLMEngine:
         use_tqdm: bool = True,
     ) -> list[str]:
         if use_tqdm:
-            pbar = tqdm(total=len(prompts),
-                        desc="Generating", dynamic_ncols=True)
+            pbar = tqdm(total=len(prompts), desc="Generating", dynamic_ncols=True)
         if not isinstance(sampling_params, list):
             sampling_params = [sampling_params] * len(prompts)
-        # 对每个 prompt 都创建一个 sampling_params，其实最好将这两个参数构造为一个结构，然后扔到 add_request 里面
         for prompt, sp in zip(prompts, sampling_params):
             self.add_request(prompt, sp)
         outputs = {}
@@ -92,7 +75,6 @@ class LLMEngine:
             output, num_tokens = self.step()
             if use_tqdm:
                 if num_tokens > 0:
-                    # 返回的是 tokens/second
                     prefill_throughput = num_tokens / (perf_counter() - t)
                 else:
                     decode_throughput = -num_tokens / (perf_counter() - t)
@@ -105,8 +87,7 @@ class LLMEngine:
                 if use_tqdm:
                     pbar.update(1)
         outputs = [outputs[seq_id] for seq_id in sorted(outputs)]
-        outputs = [{"text": self.tokenizer.decode(
-            token_ids), "token_ids": token_ids} for token_ids in outputs]
+        outputs = [{"text": self.tokenizer.decode(token_ids), "token_ids": token_ids} for token_ids in outputs]
         if use_tqdm:
             pbar.close()
         return outputs

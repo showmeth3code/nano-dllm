@@ -11,8 +11,6 @@ class Scheduler:
         self.max_num_seqs = config.max_num_seqs
         self.max_num_batched_tokens = config.max_num_batched_tokens
         self.eos = config.eos
-        print(f"[Scheduler] init with max_num_seqs={self.max_num_seqs}, max_num_batched_tokens={self.max_num_batched_tokens}, eos={self.eos}, will init block_manager with num_kvcache_blocks={config.num_kvcache_blocks}, kvcache_block_size={config.kvcache_block_size}")
-        # config.num_kvcache_blocks 初始化为 -1，在 allocate_kv_cache 时会被设置为计算出的可分配的 block 数量
         self.block_manager = BlockManager(config.num_kvcache_blocks, config.kvcache_block_size)
         self.waiting: deque[Sequence] = deque()
         self.running: deque[Sequence] = deque()
@@ -21,7 +19,6 @@ class Scheduler:
         return not self.waiting and not self.running
 
     def add(self, seq: Sequence):
-        # 先将 seq 放到 waiting 队列中
         self.waiting.append(seq)
 
     def schedule(self) -> tuple[list[Sequence], bool]:
@@ -31,23 +28,16 @@ class Scheduler:
         num_batched_tokens = 0
         while self.waiting and num_seqs < self.max_num_seqs:
             seq = self.waiting[0]
-            # 从 waiting 队列中取出 seq，如果达到最大batched_tokens(32768)，或者无法分配显存空间，则该batch组成完成
             if num_batched_tokens + len(seq) > self.max_num_batched_tokens or not self.block_manager.can_allocate(seq):
                 break
             num_seqs += 1
-            # 分配显存，根据请求的 token 数量以及是否 cache miss 来分配 kv block
-            # allocate 会将 seq 的 block_table 设置为分配的 block_id 列表（不管命中还是未命中 cache）
             self.block_manager.allocate(seq)
-            print(
-                f"[Scheduler] allocate gpu kv cache for seq={seq.seq_id}, num_tokens={len(seq)}, num_cached_tokens={seq.num_cached_tokens}, total num_blocks={seq.num_blocks}")
             num_batched_tokens += len(seq) - seq.num_cached_tokens
             seq.status = SequenceStatus.RUNNING
             self.waiting.popleft()
             self.running.append(seq)
             scheduled_seqs.append(seq)
         if scheduled_seqs:
-            print(
-                f"[Scheduler] prefill {len(scheduled_seqs)} seqs, num_batched_tokens={num_batched_tokens}")
             return scheduled_seqs, True
 
         # decode

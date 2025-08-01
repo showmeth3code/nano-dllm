@@ -37,8 +37,7 @@ class ReplicatedLinear(LinearBase):
         bias: bool = False,
     ):
         super().__init__(input_size, output_size)
-        self.weight = nn.Parameter(torch.empty(
-            self.output_size, self.input_size))
+        self.weight = nn.Parameter(torch.empty(self.output_size, self.input_size))
         self.weight.weight_loader = self.weight_loader
         if bias:
             self.bias = nn.Parameter(torch.empty(self.output_size))
@@ -63,9 +62,7 @@ class ColumnParallelLinear(LinearBase):
         bias: bool = False,
     ):
         super().__init__(input_size, output_size, 0)
-        # [B, 1024] -> [B, 4096]
         self.input_size_per_partition = input_size
-        # output_size_per_partition = 4096/2 = 2048 if tp=2
         self.output_size_per_partition = divide(output_size, self.tp_size)
         self.output_partition_sizes = [self.output_size_per_partition]
         if hasattr(self, "output_sizes"):
@@ -74,30 +71,23 @@ class ColumnParallelLinear(LinearBase):
                 for output_size in self.output_sizes
             ]
 
-        # [2048, 1024]
-        self.weight = nn.Parameter(torch.empty(
-            self.output_size_per_partition, self.input_size))
+        self.weight = nn.Parameter(torch.empty(self.output_size_per_partition, self.input_size))
         self.weight.weight_loader = self.weight_loader
         if bias:
-            self.bias = nn.Parameter(torch.empty(
-                self.output_size_per_partition))
+            self.bias = nn.Parameter(torch.empty(self.output_size_per_partition))
             self.bias.weight_loader = self.weight_loader
         else:
             self.register_parameter("bias", None)
-        print(f"[ColumnParallelLinear] tp_size: {self.tp_size}, tp_rank: {self.tp_rank}, input_size: {self.input_size}, output_size: {self.output_size}, input_size_per_partition: {self.input_size_per_partition}, output_size_per_partition: {self.output_size_per_partition}, weight: {self.weight.shape}")
 
     def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor):
         param_data = param.data
         shard_size = param_data.size(self.tp_dim)
         start_idx = self.tp_rank * shard_size
-        loaded_weight = loaded_weight.narrow(
-            self.tp_dim, start_idx, shard_size)
+        loaded_weight = loaded_weight.narrow(self.tp_dim, start_idx, shard_size)
         assert param_data.size() == loaded_weight.size()
         param_data.copy_(loaded_weight)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x @ weight^T + b
-        # [B, 1024] @ [4096/2, 1024]^T + [4096/2] -> [B, 2048] if tp=2
         return F.linear(x, self.weight, self.bias)
 
 
@@ -117,8 +107,7 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
         shard_offset = sum(self.output_sizes[:loaded_shard_id]) // self.tp_size
         shard_size = self.output_sizes[loaded_shard_id] // self.tp_size
         param_data = param_data.narrow(self.tp_dim, shard_offset, shard_size)
-        loaded_weight = loaded_weight.chunk(
-            self.tp_size, self.tp_dim)[self.tp_rank]
+        loaded_weight = loaded_weight.chunk(self.tp_size, self.tp_dim)[self.tp_rank]
         assert param_data.size() == loaded_weight.size()
         param_data.copy_(loaded_weight)
 
@@ -140,30 +129,17 @@ class QKVParallelLinear(ColumnParallelLinear):
             total_num_kv_heads = total_num_heads
         self.total_num_kv_heads = total_num_kv_heads
         tp_size = dist.get_world_size()
-        rank = dist.get_rank()
         self.num_heads = divide(self.total_num_heads, tp_size)
         self.num_kv_heads = divide(self.total_num_kv_heads, tp_size)
         input_size = self.hidden_size
-        output_size = (self.num_heads + 2 * self.num_kv_heads) * \
-            tp_size * self.head_size
+        output_size = (self.num_heads + 2 * self.num_kv_heads) * tp_size * self.head_size
         self.output_sizes = [
-            # q_proj   [B, 1024] -> [B, 16*128]
-            self.num_heads * self.head_size * tp_size,
-            # k_proj   [B, 1024] -> [B, 8*128]
-            self.num_kv_heads * self.head_size * tp_size,
-            # v_proj   [B, 1024] -> [B, 8*128]
-            self.num_kv_heads * self.head_size * tp_size,
+            self.num_heads * self.head_size * tp_size,  # q_proj
+            self.num_kv_heads * self.head_size * tp_size,  # k_proj
+            self.num_kv_heads * self.head_size * tp_size,  # v_proj 
         ]
-        # [QKVParallelLinear][0/2] input_size: 1024, output_size: 4096, bias: False, num_heads: 16, head_size: 128, num_kv_heads: 8
-        print(f"[QKVParallelLinear][{rank}/{tp_size}] input_size: {input_size}, output_size: {output_size}, bias: {bias}, num_heads: {self.num_heads}, head_size: {self.head_size}, num_kv_heads: {self.num_kv_heads}, total_num_heads: {self.total_num_heads}, total_num_kv_heads: {self.total_num_kv_heads}")
 
         super().__init__(input_size, output_size, bias)
-
-    # 如果 tp_size = 2，那么它的计算过程如下：
-    # num_heads = 8, num_kv_heads = 4 (tp_size = 2)
-    # output_size = 2048 = [8*128
-    # rank 0: q_proj, k_proj, v_proj [0:16*128]
-    # rank 1: q_proj, k_proj, v_proj [16*128:16*128+8*128]
 
     def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor, loaded_shard_id: str):
         param_data = param.data
@@ -176,11 +152,9 @@ class QKVParallelLinear(ColumnParallelLinear):
             shard_offset = self.num_heads * self.head_size
         else:
             shard_size = self.num_kv_heads * self.head_size
-            shard_offset = self.num_heads * self.head_size + \
-                self.num_kv_heads * self.head_size
+            shard_offset = self.num_heads * self.head_size + self.num_kv_heads * self.head_size
         param_data = param_data.narrow(self.tp_dim, shard_offset, shard_size)
-        loaded_weight = loaded_weight.chunk(
-            self.tp_size, self.tp_dim)[self.tp_rank]
+        loaded_weight = loaded_weight.chunk(self.tp_size, self.tp_dim)[self.tp_rank]
         assert param_data.size() == loaded_weight.size()
         param_data.copy_(loaded_weight)
 
@@ -198,8 +172,7 @@ class RowParallelLinear(LinearBase):
         self.output_size_per_partition = output_size
         self.output_partition_sizes = [output_size]
 
-        self.weight = nn.Parameter(torch.empty(
-            self.output_size, self.input_size_per_partition))
+        self.weight = nn.Parameter(torch.empty(self.output_size, self.input_size_per_partition))
         self.weight.weight_loader = self.weight_loader
         if bias:
             self.bias = nn.Parameter(torch.empty(self.output_size))
@@ -211,8 +184,7 @@ class RowParallelLinear(LinearBase):
         param_data = param.data
         shard_size = param_data.size(self.tp_dim)
         start_idx = self.tp_rank * shard_size
-        loaded_weight = loaded_weight.narrow(
-            self.tp_dim, start_idx, shard_size)
+        loaded_weight = loaded_weight.narrow(self.tp_dim, start_idx, shard_size)
         assert param_data.size() == loaded_weight.size()
         param_data.copy_(loaded_weight)
 

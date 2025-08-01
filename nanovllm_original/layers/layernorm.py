@@ -14,8 +14,7 @@ class RMSNorm(nn.Module):
         self.eps = eps
         self.weight = nn.Parameter(torch.ones(hidden_size))
 
-    # ⚠️ PyTorch 2.x 的 @torch.compile 是可选加速器，不影响模型正确性或输出。
-    # @torch.compile
+    @torch.compile
     def rms_forward(
         self,
         x: torch.Tensor,
@@ -23,24 +22,23 @@ class RMSNorm(nn.Module):
         orig_dtype = x.dtype
         x = x.to(torch.float32)
         var = x.pow(2).mean(dim=-1, keepdim=True)
-        x.mul_(torch.rsqrt(var + self.eps)) # 对 x 原地乘法，乘以 1/ sqrt(var + eps)
+        x.mul_(torch.rsqrt(var + self.eps))
         x = x.to(orig_dtype).mul_(self.weight)
         return x
 
-    # TorchInductor 在 WSL2（或某些老 CPU / 缺失 AVX）环境下的 常见 bug，源于动态编译过程中依赖的 SLEEF 数学函数库未正确链接。
-    # ⚠️ PyTorch 2.x 的 @torch.compile 是可选加速器，不影响模型正确性或输出。
-    # @torch.compile
-
-
-    def add_rms_forward(self, x, residual):
+    @torch.compile
+    def add_rms_forward(
+        self,
+        x: torch.Tensor,
+        residual: torch.Tensor,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         orig_dtype = x.dtype
         x = x.to(torch.float32).add_(residual.to(torch.float32))
-        combined = x.to(orig_dtype).clone()  # clone() 防止后续 in-place 修改
+        residual = x.to(orig_dtype)
         var = x.pow(2).mean(dim=-1, keepdim=True)
         x.mul_(torch.rsqrt(var + self.eps))
         x = x.to(orig_dtype).mul_(self.weight)
-        return x, combined
-
+        return x, residual
 
     def forward(
         self,
@@ -51,10 +49,3 @@ class RMSNorm(nn.Module):
             return self.rms_forward(x)
         else:
             return self.add_rms_forward(x, residual)
-
-
-# Root Mean Square: x除以x的平方均值的开方再乘以可学习缩放参数weight: x/sqrt(mean(x^2)+e) * weight
-# $$\text{RMSNorm}(x) = \frac{x}{\sqrt{\text{mean}(x^2) + \epsilon}} \cdot \text{weight}$$
-# [1.0, 2.0, 3.0, 4.0]
-# = > RMS = sqrt(mean([1, 4, 9, 16])) = sqrt(7.5) ≈ 2.7386
-# = > 每个值除以 2.7386 再乘以 1（初始 weight）
