@@ -89,6 +89,14 @@ class ModelRunner:
         return method(*args)
 
     def warmup_model(self):
+        """
+        这个方法负责在模型推理前进行预热，通过运行一次完整的推理过程来初始化GPU内存、编译CUDA内核、预热缓存等，确保后续推理的性能稳定。
+        1. 清空缓存
+        2. 设置最大批处理token数和最大模型长度
+        3. 创建num_seqs个Sequence对象
+        4. 运行模型
+        5. 清空缓存
+        """
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
         max_num_batched_tokens, max_model_len = self.config.max_num_batched_tokens, self.config.max_model_len
@@ -98,12 +106,40 @@ class ModelRunner:
         torch.cuda.empty_cache()
 
     def allocate_kv_cache(self):
+        """
+        这个方法负责分配KV-Cache缓存
+        1. 获取GPU内存信息
+        2. 计算KV-Cache缓存大小
+        3. 分配KV-Cache缓存
+        """
         config = self.config
         hf_config = config.hf_config
         free, total = torch.cuda.mem_get_info()
-        used = total - free
+        """
+        示例：
+            used = total - free
+                block_bytes = 2  # K和V各占一份
+                    * 32  # 32层注意力
+                    * 16  # 每个块存16个token
+                    * 32  # 32个KV头
+                    * 64  # 每个头64维
+                    * 2  # float16占2字节
+        = 2×32×16×32×64×2 = 4,194,304 字节 = 4MB（每个块大小）
+        """
+
         peak = torch.cuda.memory_stats()["allocated_bytes.all.peak"]
         current = torch.cuda.memory_stats()["allocated_bytes.all.current"]
+        
+        """
+        示例：
+        可用内存 = 总内存×利用率 - 已用内存 - 峰值冗余（peak - current）
+        available = 16GB×0.9 - 6GB - (7GB - 6GB) 
+        = 14.4GB - 6GB - 1GB = 7.4GB = 7.4×1024³字节 ≈ 7.948×10⁹字节
+
+        # 块数 = 可用内存 // 每个块大小
+        config.num_kvcache_blocks = 7.948×10⁹ // 4.194×10⁶ ≈ 1895 个块
+        """
+
         num_kv_heads = hf_config.num_key_value_heads // self.world_size
         block_bytes = 2 * hf_config.num_hidden_layers * self.block_size * num_kv_heads * hf_config.head_dim * hf_config.torch_dtype.itemsize
         config.num_kvcache_blocks = int(total * config.gpu_memory_utilization - used - peak + current) // block_bytes
@@ -141,8 +177,10 @@ class ModelRunner:
             cu_seqlens_k.append(cu_seqlens_k[-1] + seqlen_k)
             max_seqlen_q = max(seqlen_q, max_seqlen_q)
             max_seqlen_k = max(seqlen_k, max_seqlen_k)
+            # 不存在block_table, 不处理，首次填充，没有KV-Cache缓存进行存储
             if not seq.block_table:
                 continue
+            
             for i in range(seq.num_cached_blocks, seq.num_blocks):
                 start = seq.block_table[i] * self.block_size
                 if i != seq.num_blocks - 1:
@@ -207,7 +245,9 @@ class ModelRunner:
 
     def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int]:
         input_ids, positions = self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)
+        # 只为主函数进行参数调整
         temperatures = self.prepare_sample(seqs) if self.rank == 0 else None
+        # 空跑一起
         logits = self.run_model(input_ids, positions, is_prefill)
         token_ids = self.sampler(logits, temperatures).tolist() if self.rank == 0 else None
         reset_context()

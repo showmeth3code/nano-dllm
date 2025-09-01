@@ -16,16 +16,27 @@ class Sequence:
     counter = count()
 
     def __init__(self, token_ids: list[int], sampling_params = SamplingParams()):
+        # 计数器，用于生成序列ID
         self.seq_id = next(Sequence.counter)
+        # 序列状态
         self.status = SequenceStatus.WAITING
+        # 序列token_ids
         self.token_ids = copy(token_ids)
+        # 最后一个token
         self.last_token = token_ids[-1]
+        # 序列token数量
         self.num_tokens = len(self.token_ids)
+        # 序列prompt token数量
         self.num_prompt_tokens = len(token_ids)
+        # 序列cached token数量
         self.num_cached_tokens = 0
+        # 序列block table
         self.block_table = []
+        # 采样参数
         self.temperature = sampling_params.temperature
+        # 最大token数量
         self.max_tokens = sampling_params.max_tokens
+        # 是否忽略EOS
         self.ignore_eos = sampling_params.ignore_eos
 
     def __len__(self):
