@@ -115,8 +115,6 @@ class LLMEngine:
                 outputs[seq_id] = token_ids
                 if use_tqdm:
                     pbar.update(1)
-    
-        # 按seq_id排序，获取对应的解码数据（需完成后）
         outputs = [outputs[seq_id] for seq_id in sorted(outputs)]
         outputs = [{"text": self.tokenizer.decode(token_ids), "token_ids": token_ids} for token_ids in outputs]
         if use_tqdm:
