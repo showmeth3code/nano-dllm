@@ -14,6 +14,12 @@ A lightweight vLLM implementation built from scratch.
 pip install git+https://github.com/GeeeekExplorer/nano-vllm.git
 ```
 
+### Installation on AMD GPUs
+```bash 
+pip install --no-build-isolation git+https://github.com/GeeeekExplorer/nano-vllm.git
+```
+For more infomations, see [AMD's readme](./README_amd.md)
+
 ## Manual Download
 
 If you prefer to download the model weights manually, use the following command:
@@ -40,17 +46,26 @@ outputs[0]["text"]
 See `bench.py` for benchmark.
 
 **Test Configuration:**
-- Hardware: RTX 4070 Laptop (8GB)
+- Hardware:
+    - Setup 1: Nvidia RTX 4070 Laptop (8GB)
+    - Setup 2: AMD Radeon RX7900XT    (20GB)
 - Model: Qwen3-0.6B
 - Total Requests: 256 sequences
 - Input Length: Randomly sampled between 100–1024 tokens
 - Output Length: Randomly sampled between 100–1024 tokens
 
-**Performance Results:**
+**Setup 1 Performance Results:**
 | Inference Engine | Output Tokens | Time (s) | Throughput (tokens/s) |
 |----------------|-------------|----------|-----------------------|
 | vLLM           | 133,966     | 98.37    | 1361.84               |
 | Nano-vLLM      | 133,966     | 93.41    | 1434.13               |
+
+**Setup 2 Performance Results:**
+| Inference Engine | Output Tokens | Time (s) | Throughput (tokens/s) |
+|----------------|-------------|----------|-----------------------|
+| vLLM           | 133,966     | 61.80    | 2167.84               |
+| Nano-vLLM      | 133,966     | 65.91    | 2032.36               |
+
 
 
 ## Star History
