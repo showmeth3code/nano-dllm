@@ -81,10 +81,15 @@ merge_main_into_dev() {
 }
 
 main() {
+    # 上游分支确认
     ensure_remote_exists upstream
+    # 本地仓库上游分支确认
     ensure_remote_exists origin
+    # 同步上游分支到本地 main 分支
     sync_main_with_upstream
+    # 合并本地 main 分支到开发分支
     merge_main_into_dev
+    
     info "更新完成！"
 }
 
