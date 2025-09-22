@@ -70,24 +70,34 @@ class LLMEngine:
             self.add_request(prompt, sp)
         outputs = {}
         prefill_throughput = decode_throughput = 0.
+        acc_prefill_token_count = acc_decode_token_count = 0.
+        acc_prefill_time = acc_decode_time = 0.
         while not self.is_finished():
             t = perf_counter()
             output, num_tokens = self.step()
             if use_tqdm:
                 if num_tokens > 0:
-                    prefill_throughput = num_tokens / (perf_counter() - t)
+                    period = perf_counter() - t
+                    prefill_throughput = num_tokens / period
+                    acc_prefill_token_count += num_tokens
+                    acc_prefill_time += period
                 else:
-                    decode_throughput = -num_tokens / (perf_counter() - t)
+                    period = perf_counter() - t
+                    decode_throughput = -num_tokens / period
+                    acc_decode_token_count += -num_tokens
+                    acc_decode_time += period
                 pbar.set_postfix({
-                    "Prefill": f"{int(prefill_throughput)}tok/s",
-                    "Decode": f"{int(decode_throughput)}tok/s",
+                    "Prefill": f"{int(prefill_throughput)}tps",
+                    "Decode": f"{int(decode_throughput)}tps",
                 })
             for seq_id, token_ids in output:
                 outputs[seq_id] = token_ids
                 if use_tqdm:
                     pbar.update(1)
+        # print(f"acc_prefill_throghput: {acc_prefill_token_count / acc_prefill_time}tps, acc_decode_throughput: {acc_decode_token_count / acc_decode_time} tps")
         outputs = [outputs[seq_id] for seq_id in sorted(outputs.keys())]
         outputs = [{"text": self.tokenizer.decode(token_ids), "token_ids": token_ids} for token_ids in outputs]
         if use_tqdm:
             pbar.close()
+        print(f"acc_prefill_throghput: {acc_prefill_token_count / acc_prefill_time}tps, acc_decode_throughput: {acc_decode_token_count / acc_decode_time}tps")
         return outputs
