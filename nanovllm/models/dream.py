@@ -11,7 +11,6 @@ from nanovllm.layers.embed_head import VocabParallelEmbedding, ParallelLMHead
 
 from nanovllm.models.config.configuration_dream import DreamConfig
 
-
 class Qwen3Attention(nn.Module):
 
     def __init__(
