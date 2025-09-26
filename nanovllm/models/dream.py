@@ -3,7 +3,7 @@ from torch import nn
 import torch.distributed as dist
 
 from nanovllm.layers.activation import SiluAndMul
-from nanovllm.layers.attention import Attention
+from nanovllm.layers.attention.attention_v4 import Attention
 from nanovllm.layers.layernorm import RMSNorm
 from nanovllm.layers.linear import RowParallelLinear, ColumnParallelLinear
 from nanovllm.layers.rotary_embedding import get_rope

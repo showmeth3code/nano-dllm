@@ -16,6 +16,13 @@ class Config:
     eos: int = -1
     kvcache_block_size: int = 256
     num_kvcache_blocks: int = -1
+    kv_cache_layout: str = "unified"  # "unified" or "distinct"
+    mask_token_id: int = 151666
+    diffusion_block_size: int = 32
+    accept_threshold: float = 0.9
+    add_new_block_threshold: float = 0.1
+    complete_threshold: float = 0.95
+    
 
     def __post_init__(self):
         assert os.path.isdir(self.model)
