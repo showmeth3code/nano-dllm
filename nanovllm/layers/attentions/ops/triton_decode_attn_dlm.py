@@ -12,7 +12,7 @@ import triton
 
 import triton.language as tl
 
-from d2f_vllm.utils.context import ContextForDiffusionLM
+from nanovllm.utils.diffu_context import ContextForDiffusionLM
 
 
 def CHECK_ATTENTION(o: torch.Tensor, q: torch.Tensor, k_new: torch.Tensor, v_new: torch.Tensor,
@@ -24,7 +24,7 @@ def CHECK_ATTENTION(o: torch.Tensor, q: torch.Tensor, k_new: torch.Tensor, v_new
     from torch.nn.functional import scaled_dot_product_attention as sdpa
     from torch.nn.attention import SDPBackend, sdpa_kernel
     
-    from d2f_vllm.layers.attention.ops import load_kvcache
+    from nanovllm.layers.attentions.ops import load_kvcache
     
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cudnn.allow_tf32 = False

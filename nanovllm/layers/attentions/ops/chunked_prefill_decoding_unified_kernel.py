@@ -18,7 +18,7 @@ from vllm.platforms import current_platform
 from vllm.platforms.rocm import use_rocm_custom_paged_attention
 from vllm.triton_utils import tl, triton
 
-from d2f_vllm.layers.attention.ops.prefix_prefill import context_attention_fwd
+from nanovllm.layers.attentions.ops.prefix_prefill import context_attention_fwd
 
 
 @triton.jit

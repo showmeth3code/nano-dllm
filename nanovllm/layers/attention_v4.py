@@ -9,7 +9,7 @@ from einops import rearrange
 from torch.nn.attention.flex_attention import create_block_mask 
 from transformers.integrations.flex_attention import compile_friendly_flex_attention as flex_attention
 
-from nanovllm.layers.attention.ops import (
+from nanovllm.layers.attentions.ops import (
     causal_lm_flash_decoding, diffusion_lm_flash_decoding, diffusion_lm_parallel_flash_decoding,
     store_kvcache_unified_layout, store_kvcache_distinct_layout, load_kvcache,
     CHECK_STORING, CHECK_LOADING, CHECK_ATTENTION
@@ -88,7 +88,7 @@ class Attention(nn.Module):
         k = k.view(-1, self.num_kv_heads, self.head_dim)
         v = v.view(-1, self.num_kv_heads, self.head_dim)
 
-        context: ContextForDiffusionLM = get_context_causal_lm() if self.model_type == 'causal_lm' else get_context_diffusion_lm()
+        context: ContextForDiffusionLM = get_context() if self.model_type == 'causal_lm' else get_context()
         k_cache, v_cache = self.k_cache, self.v_cache
         is_unified_layout = context.kv_cache_layout == "unified"
 

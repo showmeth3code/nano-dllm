@@ -6,8 +6,8 @@ import triton.language as tl
 from typing import Tuple
 from einops import rearrange
 
-from d2f_vllm.utils.context import ContextForDiffusionLM 
-from d2f_vllm.engine.sequence import SequenceForDiffusionLM
+from nanovllm.utils.diffu_context import ContextForDiffusionLM 
+from nanovllm.engine.diffu_sequence import SequenceForDiffusionLM
 
 @triton.jit
 def store_kvcache_kernel_causal_lm(

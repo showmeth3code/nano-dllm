@@ -9,6 +9,7 @@ from nanovllm.engine.diffu_sequence import SequenceForDiffusionLM as Sequence
 # from nanovllm.models.qwen3 import Qwen3ForCausalLM
 # from nanovllm.models.llada import LLaDAModelLM
 from nanovllm.models.dream import DreamForDiffusionLM
+from nanovllm.layers.diffu_sampler import SamplerForDream
 from nanovllm.layers.sampler import Sampler
 from nanovllm.utils.diffu_context import set_context, get_context, reset_context
 from nanovllm.utils.loader import load_model
@@ -34,7 +35,7 @@ class ModelRunner:
         self.model = DreamForDiffusionLM(hf_config)
         # self.model = Qwen3ForCausalLM(hf_config)
         load_model(self.model, config.model)
-        self.sampler = Sampler()
+        self.sampler = SamplerForDream() if self.config.is_dllm else Sampler()
         self.warmup_model()
         self.allocate_kv_cache()
         if not self.enforce_eager:

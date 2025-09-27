@@ -6,6 +6,7 @@ from transformers import AutoConfig
 @dataclass
 class Config:
     model: str
+    is_dllm = True
     max_num_batched_tokens: int = 16384
     max_num_seqs: int = 512
     max_model_len: int = 4096
