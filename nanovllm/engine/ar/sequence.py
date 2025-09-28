@@ -4,7 +4,6 @@ from itertools import count
 
 from nanovllm.sampling_params import SamplingParams
 
-
 class SequenceStatus(Enum):
     WAITING = auto()
     RUNNING = auto()

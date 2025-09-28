@@ -12,7 +12,7 @@ import triton
 
 import triton.language as tl
 
-from nanovllm.utils.diffu_context import ContextForDiffusionLM
+from nanovllm.utils.diffusion_context import ContextForDiffusionLM
 
 
 def CHECK_ATTENTION(o: torch.Tensor, q: torch.Tensor, k_new: torch.Tensor, v_new: torch.Tensor,

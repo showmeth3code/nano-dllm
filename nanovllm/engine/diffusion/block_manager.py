@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Deque, Set
 
 from nanovllm.config import Config
-from nanovllm.engine.diffu_sequence import SequenceForDiffusionLM
+from nanovllm.engine.diffusion.sequence import SequenceForDiffusionLM
 
 
 @dataclass
@@ -26,8 +26,7 @@ class Block:
         self.hash = -1
         self.token_ids = []
 
-
-class BlockManagerBase(ABC):
+class BlockManagerForDiffusionLM():
     def __init__(self, num_blocks: int, block_size: int):
         assert num_blocks > 0
         self.block_size = block_size
@@ -94,17 +93,7 @@ class BlockManagerBase(ABC):
                 self._free_block(block_id)
         seq.num_cached_tokens = 0
         seq.block_table.clear()
-
-    @abstractmethod
-    def can_append(self, seq) -> bool:
-        pass
-
-    @abstractmethod
-    def may_append(self, seq):
-        pass
-            
-
-class BlockManagerForDiffusionLM(BlockManagerBase):
+        
     def can_append(self, seq: SequenceForDiffusionLM) -> bool:
         return len(self.free_block_ids) >= (seq.cached_or_caching_num_tokens % self.block_size == 1)
     

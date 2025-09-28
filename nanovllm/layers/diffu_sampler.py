@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from easydict import EasyDict as edict
 
 from nanovllm.config import Config
-from nanovllm.utils.diffu_context import get_context
+from nanovllm.utils.diffusion_context import get_context
 
 
 class SamplerForCausalLM(nn.Module):

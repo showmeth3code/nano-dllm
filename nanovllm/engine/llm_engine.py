@@ -7,10 +7,12 @@ import torch.multiprocessing as mp
 
 from nanovllm.config import Config
 from nanovllm.sampling_params import SamplingParams
-from nanovllm.engine.diffu_sequence import SequenceForDiffusionLM as Sequence
-from nanovllm.engine.scheduler import SchedulerForDiffusionLM as Scheduler
-from nanovllm.engine.diffu_model_runner import ModelRunnerForDiffusionLM
-from nanovllm.engine.model_runner import ModelRunner
+from nanovllm.engine.ar.sequence import Sequence
+from nanovllm.engine.ar.model_runner import ModelRunner
+from nanovllm.engine.ar.scheduler import Scheduler
+from nanovllm.engine.diffusion.sequence import SequenceForDiffusionLM
+from nanovllm.engine.diffusion.scheduler import SchedulerForDiffusionLM
+from nanovllm.engine.diffusion.model_runner import ModelRunnerForDiffusionLM
 
 class LLMEngine:
 
@@ -33,7 +35,7 @@ class LLMEngine:
         self.model_runner = ModelRunnerForDiffusionLM(config, 0, self.events) if config.is_dllm else ModelRunner(config, 0, self.events)
         self.tokenizer = AutoTokenizer.from_pretrained(config.model, use_fast=True, trust_remote_code=True)
         config.eos = self.tokenizer.eos_token_id
-        self.scheduler = Scheduler(config)
+        self.scheduler = SchedulerForDiffusionLM(config) if config.is_dllm else Scheduler(config)
         atexit.register(self.exit)
 
     def exit(self):
@@ -45,7 +47,7 @@ class LLMEngine:
     def add_request(self, prompt: str | list[int], sampling_params: SamplingParams):
         if isinstance(prompt, str):
             prompt = self.tokenizer.encode(prompt)
-        seq = Sequence(prompt, sampling_params, config=self.config)
+        seq = SequenceForDiffusionLM(prompt, sampling_params, config=self.config) if self.config.is_dllm else Sequence(prompt, sampling_params)
         self.scheduler.add(seq)
 
     def step(self):
@@ -99,6 +101,8 @@ class LLMEngine:
                     pbar.update(1)
         # print(f"acc_prefill_throghput: {acc_prefill_token_count / acc_prefill_time}tps, acc_decode_throughput: {acc_decode_token_count / acc_decode_time} tps")
         outputs = [outputs[seq_id] for seq_id in sorted(outputs.keys())]
+        # print(outputs)
+        # print(self.tokenizer.decode(6395))
         outputs = [{"text": self.tokenizer.decode(token_ids), "token_ids": token_ids} for token_ids in outputs]
         if use_tqdm:
             pbar.close()

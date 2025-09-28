@@ -3,7 +3,7 @@ import torch
 from typing import List
 from dataclasses import dataclass
 
-from nanovllm.engine.diffu_sequence import SequenceForDiffusionLM
+from nanovllm.engine.diffusion.sequence import SequenceForDiffusionLM
 
 @dataclass
 class ContextBase:
