@@ -3,7 +3,7 @@ from torch import nn
 import torch.distributed as dist
 
 from nanovllm.layers.activation import SiluAndMul
-from nanovllm.layers.attention import Attention
+from nanovllm.layers.attention import BlockAttention
 from nanovllm.layers.layernorm import RMSNorm
 from nanovllm.layers.linear import RowParallelLinear, ColumnParallelLinear
 from nanovllm.layers.rotary_embedding import get_rope
@@ -65,7 +65,7 @@ class Qwen3Attention(nn.Module):
             base=rope_theta,
             rope_scaling=rope_scaling,
         )
-        self.attn = Attention(
+        self.attn = BlockAttention(
             self.num_heads,
             self.head_dim,
             self.scaling,
