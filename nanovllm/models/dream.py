@@ -3,7 +3,7 @@ from torch import nn
 import torch.distributed as dist
 
 from nanovllm.layers.activation import SiluAndMul
-from nanovllm.layers.attention import BlockAttention
+from nanovllm.layers.attentions.attention_v4 import Attention
 from nanovllm.layers.layernorm import RMSNorm
 from nanovllm.layers.linear import RowParallelLinear, ColumnParallelLinear
 from nanovllm.layers.rotary_embedding import get_rope
@@ -65,11 +65,12 @@ class Qwen3Attention(nn.Module):
             base=rope_theta,
             rope_scaling=rope_scaling,
         )
-        self.attn = BlockAttention(
+        self.attn = Attention(
             self.num_heads,
             self.head_dim,
             self.scaling,
             self.num_kv_heads,
+            "diffusion_lm",
         )
 
     def forward(
@@ -81,11 +82,12 @@ class Qwen3Attention(nn.Module):
         k = self.k_proj(hidden_states)
         v = self.v_proj(hidden_states)
         
-        q = q.view(-1, self.num_heads, self.head_dim)
-        k = k.view(-1, self.num_kv_heads, self.head_dim)
-        v = v.view(-1, self.num_kv_heads, self.head_dim)
+        # q = q.view(-1, self.num_heads, self.head_dim)
+        # k = k.view(-1, self.num_kv_heads, self.head_dim)
+        # v = v.view(-1, self.num_kv_heads, self.head_dim)
         
         q, k = self.rotary_emb(positions, q, k)
+        # print(f"q size: {q.size()}, k size: {k.size()}, v size: {v.size()}")
         o = self.attn(q, k, v)
         output = self.o_proj(o.flatten(1, -1))
         return output
@@ -186,7 +188,8 @@ class DreamModel(nn.Module):
     ) -> torch.Tensor:
         hidden_states = self.embed_tokens(input_ids)
         residual = None
-        for layer in self.layers:
+        for i, layer in enumerate(self.layers):
+            # print(f"Computing layer {i}")
             hidden_states, residual = layer(positions, hidden_states, residual)
         hidden_states, _ = self.norm(hidden_states, residual)
         return hidden_states
