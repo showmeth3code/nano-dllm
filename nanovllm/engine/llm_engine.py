@@ -17,15 +17,15 @@ from nanovllm.engine.diffusion.model_runner import ModelRunnerForDiffusionLM
 class LLMEngine:
 
     def __init__(self, model, **kwargs):
-        # print(111111)
         config_fields = {field.name for field in fields(Config)}
         config_kwargs = {k: v for k, v in kwargs.items() if k in config_fields}
         config = Config(model, **config_kwargs)
         self.config = config
+        # check if model is a dllm model
+        self.config.is_dllm = True if "Dream" in model else False
         self.ps = []
         self.events = []
         ctx = mp.get_context("spawn")
-        # print(3333333)
         for i in range(1, config.tensor_parallel_size):
             event = ctx.Event()
             process = ctx.Process(target=ModelRunnerForDiffusionLM if config.is_dllm else ModelRunner, args=(config, i, event))
@@ -55,7 +55,10 @@ class LLMEngine:
         token_ids = self.model_runner.call("run", seqs, is_prefill)
         self.scheduler.postprocess(seqs, token_ids)
         outputs = [(seq.seq_id, seq.completion_token_ids) for seq in seqs if seq.is_finished]
-        num_tokens = sum(len(seq) for seq in seqs) if is_prefill else -len(seqs)
+        if not self.config.is_dllm:
+            num_tokens = sum(len(seq) for seq in seqs) if is_prefill else -len(seqs)
+        else:
+            num_tokens = sum(seq.input_num_tokens + seq.new_tokens for seq in seqs) if is_prefill else -sum(seq.new_tokens for seq in seqs)
         return outputs, num_tokens
 
     def is_finished(self):
@@ -106,5 +109,6 @@ class LLMEngine:
         outputs = [{"text": self.tokenizer.decode(token_ids), "token_ids": token_ids} for token_ids in outputs]
         if use_tqdm:
             pbar.close()
+        print(f"acc_decode_token_count: {acc_decode_token_count}, acc_decode_time: {acc_decode_time}")
         print(f"acc_prefill_throghput: {acc_prefill_token_count / acc_prefill_time}tps, acc_decode_throughput: {acc_decode_token_count / acc_decode_time}tps")
         return outputs

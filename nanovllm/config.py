@@ -23,6 +23,7 @@ class Config:
     accept_threshold: float = 0.9
     add_new_block_threshold: float = 0.1
     complete_threshold: float = 0.95
+    port: int = 2444
     
 
     def __post_init__(self):
