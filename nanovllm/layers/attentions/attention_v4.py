@@ -9,12 +9,13 @@ from einops import rearrange
 from torch.nn.attention.flex_attention import create_block_mask 
 from transformers.integrations.flex_attention import compile_friendly_flex_attention as flex_attention
 
-from d2f_vllm.layers.attention.ops import (
+from nanovllm.layers.attentions.ops import (
     causal_lm_flash_decoding, diffusion_lm_flash_decoding, diffusion_lm_parallel_flash_decoding,
     store_kvcache_unified_layout, store_kvcache_distinct_layout, load_kvcache,
     CHECK_STORING, CHECK_LOADING, CHECK_ATTENTION
 )
-from d2f_vllm.utils.context import ContextForDiffusionLM, get_context_causal_lm, get_context_diffusion_lm
+from nanovllm.utils.ar_conetxt import ContextForCausalLM, get_context as get_context_causal_lm
+from nanovllm.utils.diffusion_context import ContextForDiffusionLM, get_context as get_context_diffusion_lm
 
 
 class Attention(nn.Module):
