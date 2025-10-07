@@ -20,9 +20,9 @@ class LLMEngine:
         config_fields = {field.name for field in fields(Config)}
         config_kwargs = {k: v for k, v in kwargs.items() if k in config_fields}
         config = Config(model, **config_kwargs)
-        self.config = config
         # check if model is a dllm model
-        self.config.is_dllm = True if "Dream" in model else False
+        config.is_dllm = True if "Dream" in model else False
+        self.config = config
         self.ps = []
         self.events = []
         ctx = mp.get_context("spawn")

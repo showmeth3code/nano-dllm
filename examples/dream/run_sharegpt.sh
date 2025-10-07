@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICE=0 python ./examples/qwen/sharegpt_bench.py --dataset sharegpt --sharegpt-file ~/nano-dllm/dataset/ShareGPT_V3_unfiltered_cleaned_split.json --max-requests 1024 --max-concurrency 256 --max-batch-size 256 --max-input-len 2048 --output-len 128 --max-output-len 512 --ignore-eos --report-prefix ./reports/dream_sharegpt_rr64_mc256

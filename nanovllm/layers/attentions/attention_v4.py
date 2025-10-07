@@ -14,7 +14,7 @@ from nanovllm.layers.attentions.ops import (
     store_kvcache_unified_layout, store_kvcache_distinct_layout, load_kvcache,
     CHECK_STORING, CHECK_LOADING, CHECK_ATTENTION
 )
-from nanovllm.utils.ar_conetxt import ContextForCausalLM, get_context as get_context_causal_lm
+from nanovllm.utils.ar_context import ContextForCausalLM, get_context as get_context_causal_lm
 from nanovllm.utils.diffusion_context import ContextForDiffusionLM, get_context as get_context_diffusion_lm
 
 

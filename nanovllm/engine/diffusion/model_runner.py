@@ -19,7 +19,7 @@ class ModelRunnerForDiffusionLM():
         self.config = config
         hf_config = config.hf_config
         self.block_size = config.kvcache_block_size
-        self.enforce_eager = config.enforce_eager
+        self.enforce_eager = True
         self.world_size = config.tensor_parallel_size
         self.rank = rank
         self.event = event
@@ -35,8 +35,8 @@ class ModelRunnerForDiffusionLM():
         self.sampler = SamplerForDream() if self.config.is_dllm else Sampler()
         self.warmup_model()
         self.allocate_kv_cache()
-        if not self.enforce_eager:
-            self.capture_cudagraph()
+        # if not self.enforce_eager:
+        #     self.capture_cudagraph()
         torch.set_default_device("cpu")
         torch.set_default_dtype(default_dtype)
 
@@ -57,8 +57,8 @@ class ModelRunnerForDiffusionLM():
             dist.barrier()
             if self.rank == 0:
                 self.shm.unlink()
-        if not self.enforce_eager:
-            del self.graphs, self.graph_pool
+        # if not self.enforce_eager:
+        #     del self.graphs, self.graph_pool
         torch.cuda.synchronize()
         dist.destroy_process_group()
 

@@ -21,7 +21,7 @@ class Config:
     mask_token_id: int = 151666
     diffusion_block_size: int = 32
     accept_threshold: float = 0.9
-    add_new_block_threshold: float = 0.1
+    add_new_block_threshold: float = 1.0
     complete_threshold: float = 0.95
     port: int = 2444
     
