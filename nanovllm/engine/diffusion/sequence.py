@@ -45,9 +45,12 @@ class DiffusionBlock:
     
     @property
     def current_complete_ratio(self) -> float:
-        return (
-            sum([token_id != self.mask_token_id for token_id in self.token_ids]) / self.size
-        ) if self.size > 0 else 0.0
+        # return (
+        #     sum([token_id != self.mask_token_id for token_id in self.token_ids]) / self.size
+        # ) if self.size > 0 else 0.0
+        if self.block_id == 0:
+            return 1.0
+        return 1.0 if (self.seq.n_steps + 1) % 32 == 0 else (self.seq.n_steps % 32) / 32.0
 
     @property
     def available_to_cache(self) -> bool:
@@ -71,7 +74,8 @@ class DiffusionBlock:
     
     @property
     def add_new_block(self) -> bool:
-        return self.current_complete_ratio >= self.add_new_block_threshold
+        # return self.current_complete_ratio >= self.add_new_block_threshold
+        return self.block_id == 0 or self.seq.n_steps % 32 == 31
     
     @property
     def token_ids(self) -> torch.Tensor:
@@ -108,9 +112,10 @@ class DiffusionBlock:
         
     def modify_token(self, local_token_id: int, modified_to: int) -> None:
         target_id = local_token_id + self.global_start_id
-        assert self.seq.token_ids[target_id] == self.mask_token_id
+        # assert self.seq.token_ids[target_id] == self.mask_token_id
         self.seq.token_ids[target_id] = modified_to.item()
-        self.seq.new_tokens += 1
+        if self.seq.token_ids[target_id] == self.mask_token_id:
+            self.seq.new_tokens += 1
 
 class SequenceForDiffusionLM(Sequence):
     """Sequence implementation for Diffusion Language Models."""
@@ -130,6 +135,8 @@ class SequenceForDiffusionLM(Sequence):
         self.block_cache_missed = []
         self.diffusion_blocks: List[DiffusionBlock] = []
         self.n_steps = 0
+        
+        # print(self)
     
     def __getstate__(self):
         diffusion_blocks_state = []
@@ -362,6 +369,7 @@ class SequenceForDiffusionLM(Sequence):
                 diff_blk.in_cache()
             elif diff_blk.is_active:
                 if diff_blk.available_to_cache:
+                    # print(f'Block {diff_blk.block_id} is available to cache.')
                     diff_blk.to_cache()
                 else:
                     break
@@ -432,6 +440,7 @@ class SequenceForDiffusionLM(Sequence):
             )
             
             diffusion_seq = [self.mask_token_id] * added_num_tokens
+            # print(f"Adding new diffusion block with size {added_num_tokens}.")
             current_diffusion_block = DiffusionBlock(
                 block_id=len(self.diffusion_blocks),
                 status=DiffusionBlockStatus.ACTIVE,
